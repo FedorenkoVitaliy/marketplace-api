@@ -1,11 +1,16 @@
+import { readFileSync } from 'node:fs';
 import express, { type ErrorRequestHandler } from 'express';
 import { middleware } from 'express-openapi-validator';
+import swaggerUi from 'swagger-ui-express';
+import { parse } from 'yaml';
 
 const PORT = 3000;
+const openApiDocument = parse(readFileSync('openapi/openapi.yaml', 'utf8'));
 
 const app = express();
 
 app.use(express.json());
+app.use('/docs', swaggerUi.serve, swaggerUi.setup(openApiDocument));
 
 app.use(middleware({
     apiSpec: 'openapi/openapi.yaml',
