@@ -1,0 +1,206 @@
+openapi: 3.0.3
+info:
+  title: Marketplace API
+  version: 1.0.0
+servers:
+  - url: http://localhost:3000
+security: []
+paths: 
+  /products:
+    get:
+      operationId: productsList
+      summary: List of products
+      parameters: 
+        - name: limit
+          in: query
+          schema: 
+            type: integer
+        - name: cursor
+          in: query
+          description: cursor it token position, client send value of next_cursor; opaque, do not parse or construct
+          schema:
+            type: string
+      responses:
+        '200': 
+          description: Product list response
+          content: 
+            application/json:
+              schema:
+                type: object
+                required:
+                  - items
+                  - next_cursor
+                properties:
+                  items:
+                    type: array
+                    items: 
+                      $ref: '#/components/schemas/Product'
+                  next_cursor:
+                    type: string
+                    nullable: true
+        '400':
+          description: Not valid request
+          content: 
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+  /products/{id}:
+    get:
+      operationId: productsItem
+      summary: Item of product list
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200': 
+          description: Item of product list response
+          content: 
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Product'
+        '404':
+          description: Not found item
+          content: 
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+  /orders:
+    get:
+      operationId: ordersList
+      summary: List of orders
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+        - name: cursor
+          in: query
+          description: cursor it token position, client send value of next_cursor; opaque, do not parse or construct
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Order list response
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - items
+                  - next_cursor
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Order'
+                  next_cursor:
+                    type: string
+                    nullable: true
+        '400':
+          description: Not valid request
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+    post:
+      operationId: createOrder
+      summary: Create an order
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: "Same key and body replay; different body is an error."
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateOrder'
+      responses:
+        '201':
+          description: Order created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Order'
+        '400':
+          description: Not valid request
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+  /orders/{id}:
+    get:
+      operationId: ordersItem
+      summary: Item of order list
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200': 
+          description: Item of order list response
+          content: 
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Order'
+        '404':
+          description: Not found order
+          content: 
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+
+components:
+  schemas:
+    Problem:
+      type: object
+      properties:
+        type:
+          type: string
+          format: uri
+          description: something
+        title: 
+          type: string
+        status:
+          type: integer
+        detail:
+          type: string
+        instance:
+          type: string
+      required:
+        - type
+        - title
+        - status
+        - detail
+        - instance
+    Product:
+      type: object
+      properties:
+        id:
+          type: integer
+    Order:
+      type: object
+      properties:
+        id: 
+          type: integer
+        total_cents:
+          type: integer
+    CreateOrder:
+      type: object
+      required:
+        - items
+      properties:
+        items:
+          type: array
+          minItems: 1
+          items:
+            type: integer
+            description: "Product id"

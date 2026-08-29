@@ -17,7 +17,12 @@
   "author": "",
   "license": "ISC",
   "devDependencies": {
+    "@types/express": "^5.0.6",
     "@types/node": "^26.2.0",
     "typescript": "^6.0.3"
+  },
+  "dependencies": {
+    "express": "^4.22.2",
+    "express-openapi-validator": "^5.6.2"
   }
 }
