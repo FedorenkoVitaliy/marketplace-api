@@ -1,8 +1,22 @@
 import { readFileSync } from 'node:fs';
-import express, { type ErrorRequestHandler } from 'express';
+import express, { type ErrorRequestHandler, type Request } from 'express';
 import { middleware } from 'express-openapi-validator';
 import swaggerUi from 'swagger-ui-express';
 import { parse } from 'yaml';
+
+type QueryValue = Request['query'][string];
+
+const getCurrentCursor = (cursor: QueryValue) => {
+    return typeof cursor === 'string'
+        ? Number(Buffer.from(cursor, 'base64url').toString())
+        : 0;
+}
+
+const getNextCursor = (cursor: number, length: number) => {
+    return cursor < length
+        ? Buffer.from(String(cursor)).toString('base64url')
+        : null;
+}
 
 const PORT = 3000;
 const openApiDocument = parse(readFileSync('openapi/openapi.yaml', 'utf8'));
@@ -22,7 +36,11 @@ const products = [{ id: 1 }, { id: 2 }];
 const orders: { id: number; total_cents: number }[] = [];
 
 app.get('/products', (req, res) => {
-    res.json({ items: products, next_cursor: null });
+    const limit = Number(req.query.limit) || products.length;
+    const cursor = getCurrentCursor(req.query.cursor);
+    const end = cursor + limit;
+    const next_cursor = getNextCursor(end, products.length);
+    res.json({ items: products.slice(cursor, end), next_cursor });
 });
 
 app.get('/products/:id', (req, res, next) => {
@@ -44,7 +62,12 @@ app.post('/orders', (req, res) => {
 });
 
 app.get('/orders', (req, res) => {
-    res.json({ items: orders, next_cursor: null });
+    const limit = Number(req.query.limit) || orders.length;
+    const cursor = getCurrentCursor(req.query.cursor);
+    const end = cursor + limit;
+    const next_cursor = getNextCursor(end, orders.length);
+
+    res.json({ items: orders.slice(cursor, end), next_cursor });
 });
 
 app.get('/orders/:id', (req, res, next) => {

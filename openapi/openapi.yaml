@@ -188,6 +188,9 @@ components:
           type: integer
     Order:
       type: object
+      required:
+        - id
+        - total_cents
       properties:
         id: 
           type: integer
@@ -195,6 +198,7 @@ components:
           type: integer
     CreateOrder:
       type: object
+      additionalProperties: false
       required:
         - items
       properties:
