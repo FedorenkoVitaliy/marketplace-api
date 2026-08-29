@@ -38,6 +38,22 @@ app.post('/orders', (req, res) => {
     res.status(201).json(order);
 });
 
+app.get('/orders', (req, res) => {
+    res.json({ items: orders, next_cursor: null });
+});
+
+app.get('/orders/:id', (req, res, next) => {
+    const id = Number(req.params.id);
+    const order = orders.find((o) => o.id === id);
+    if (!order) {
+        const error = new Error('Order not found');
+        (error as { status?: number }).status = 404;
+        next(error);
+        return;
+    }
+    res.json(order);
+});
+
 const problemHandler: ErrorRequestHandler = (error, req, res, _next) => {
     const status = (error as { status?: number }).status ?? 500;
     const detail = error instanceof Error ? error.message : 'Unexpected error';
