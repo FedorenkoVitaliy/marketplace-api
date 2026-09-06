@@ -2,10 +2,11 @@ import 'reflect-metadata';
 import express, { type ErrorRequestHandler } from 'express';
 import { middleware } from 'express-openapi-validator';
 import { NestFactory } from '@nestjs/core';
+import { ConfigService } from '@nestjs/config';
 import { ExpressAdapter } from '@nestjs/platform-express';
 import { AppModule } from './app.module.js';
+import { type Env } from './config/env.schema.js';
 
-const PORT = 3000;
 const app = express();
 
 app.use(express.json());
@@ -13,6 +14,13 @@ app.use(middleware({
     apiSpec: 'openapi/openapi.yaml',
     validateRequests: true,
     validateResponses: true,
+    ignorePaths: (path: string) => {
+        if(path === '/health' || path === '/db'){
+            return true
+        } else {
+            return false
+        }
+    }
 }));
 
 const problemHandler: ErrorRequestHandler = (error, req, res, _next) => {
@@ -33,8 +41,11 @@ async function bootstrap() {
         new ExpressAdapter(app),
         { bodyParser: false },
     );
+    const config = nestApp.get(ConfigService<Env, true>);
+    const configPort = config.get('PORT', { infer: true });
+
     nestApp.enableShutdownHooks();
     app.use(problemHandler);
-    await nestApp.listen(PORT);
+    await nestApp.listen(configPort);
 }
 bootstrap();
