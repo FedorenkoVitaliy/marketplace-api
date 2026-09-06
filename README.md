@@ -63,7 +63,7 @@ Zod-схема `src/config/env.schema.ts` — єдине місце, яке чи
 | Змінна / секрет | Джерело | На старті / на зʼєднання |
 |---|---|---|
 | `PORT` | `.env` (приклад у `.env.example`) | старт, Zod coerce number 1024–65535 |
-| `DB_URL` | `.env` | старт, `postgres://…`; пароль у URL ігнорується пулом |
+| `DB_URL` | `.env` | старт, host/user/db з URL; пароль з URL **не** йде в `pg.Pool` (інакше затре функцію з файла) |
 | `LOG_LEVEL` | `.env`, дефолт `info` | старт |
 | пароль `app_user` | файл `secrets/db_password` (gitignored) | кожне **нове** зʼєднання пулу |
 
@@ -83,7 +83,16 @@ npm start
 - `GET /health` — `uptime` процесу (поза OpenAPI, `ignorePaths`).
 - `GET /db` — `SELECT 1` через пул.
 
-Без `DB_URL` процес не стартує: `env -u DB_URL npm start` має вийти з кодом ≠ 0 і імʼям змінної в повідомленні.
+Fail-fast (dotenv інакше підхопить змінну з файла):
+
+```bash
+mv .env /tmp/marketplace.env
+env -u DB_URL npm run start
+echo $?
+mv /tmp/marketplace.env .env
+```
+
+Процес має завершитись з кодом ≠ 0, у виводі — імʼя зламаної змінної (`DB_URL`).
 
 ### Ротація пароля БД
 
