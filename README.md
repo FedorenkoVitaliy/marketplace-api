@@ -73,12 +73,15 @@ Zod-схема `src/config/env.schema.ts` — єдине місце, яке чи
 
 ```bash
 cp .env.example .env
-# secrets/db_password уже має збігатися з паролем у init.sql (app-v1-password)
+mkdir -p secrets
+printf 'app-v1-password' > secrets/db_password
 
 docker compose up -d
 npm install
 npm start
 ```
+
+`printf` без `\n`: той самий стартовий пароль, що в `init.sql`. Файл gitignored — на чистому клоні його немає, поки не створиш. Після `docker compose down -v` Postgres знову `app-v1-password`; якщо файл уже ротований — поверни його так само, інакше `password authentication failed`.
 
 - `GET /health` — `uptime` процесу (поза OpenAPI, `ignorePaths`).
 - `GET /db` — `SELECT 1` через пул.

@@ -14,6 +14,6 @@ export function createPool(connectionString: string) {
         },
         max: 3,
     })
-    pool.on('error', () => console.log('error'))
+    pool.on('error', (err) => console.error(err.message))
     return pool
 }
