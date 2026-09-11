@@ -69,6 +69,20 @@ Zod-схема `src/config/env.schema.ts` — єдине місце, яке чи
 
 `.env` і `secrets/` не в git і не в Docker-образі. Перевірка ключів прикладу: `npm run check:env` (має надрукувати `sync`).
 
+### Підняти Postgres
+
+Свіжий клон, без `.env` і без `secrets/db_password`. Пароль `admin` уже в `docker-compose.yml`.
+
+```bash
+docker compose up -d --wait
+```
+
+```bash
+docker compose exec -T db psql -U admin -d marketplace -Atc "SELECT 1"
+```
+
+Має надрукувати `1`.
+
 ### Запуск
 
 ```bash
