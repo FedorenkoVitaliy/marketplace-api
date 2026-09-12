@@ -30,4 +30,7 @@ CREATE TABLE order_items (
 
 ALTER TABLE products
   ADD COLUMN search_vector tsvector
-  GENERATED ALWAYS AS (to_tsvector('simple', name || ' ' || description)) STORED;
+  GENERATED ALWAYS AS (
+    setweight(to_tsvector('simple', name), 'A') ||
+    setweight(to_tsvector('simple', description), 'B')
+  ) STORED;

@@ -3,6 +3,7 @@ CREATE INDEX idx_orders_user_created
 
 CREATE INDEX idx_orders_pending
   ON orders (created_at)
+  INCLUDE (id, user_id)
   WHERE status = 'pending';
 
 CREATE INDEX idx_users_email_lower
