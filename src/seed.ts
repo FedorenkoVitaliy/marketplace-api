@@ -6,7 +6,7 @@ import { OrderItem } from './entities/order-item.entity.js'
 
 await dataSource.initialize()
 
-const userNames = ['seller', 'buyer', 'client'];
+const userNames = ['seller', 'buyer', 'client', 'guest', 'support'];
 const users = dataSource.getRepository(User);
 for (const userName of userNames) {
     const email = `${userName}@shop.test`
@@ -23,6 +23,8 @@ const catalog = [
     { name: 'Шкіряні кросівки', description: 'Демісезонні', price: 129900 },
     { name: 'Зимова куртка', description: 'Пухова', price: 450000 },
     { name: 'Рюкзак', description: 'Міський', price: 89000 },
+    { name: 'Шапка', description: 'Вовна', price: 25000 },
+    { name: 'Шарф', description: 'Кашемір', price: 41000 },
   ]
   for (const row of catalog) {
     let product = await products.findOne({ where: { name: row.name } })
@@ -34,15 +36,21 @@ const catalog = [
 
 const buyer = await users.findOneByOrFail({ email: 'buyer@shop.test' })
 const client = await users.findOneByOrFail({ email: 'client@shop.test' })
+const guest = await users.findOneByOrFail({ email: 'guest@shop.test' })
+const support = await users.findOneByOrFail({ email: 'support@shop.test' })
 const boots = await products.findOneByOrFail({ name: 'Шкіряні кросівки' })
 const jacket = await products.findOneByOrFail({ name: 'Зимова куртка' })
 const backpack = await products.findOneByOrFail({ name: 'Рюкзак' })
+const hat = await products.findOneByOrFail({ name: 'Шапка' })
+const scarf = await products.findOneByOrFail({ name: 'Шарф' })
 const orders = dataSource.getRepository(Order)
 const items = dataSource.getRepository(OrderItem)
 const tickets = [
     { user: buyer, status: 'pending', created_at: new Date('2024-01-15T12:00:00Z'), product: boots, qty: 1 },
     { user: buyer, status: 'completed', created_at: new Date('2024-02-01T09:00:00Z'), product: jacket, qty: 1 },
     { user: client, status: 'pending', created_at: new Date('2024-03-10T18:00:00Z'), product: backpack, qty: 2 },
+    { user: guest, status: 'cancelled', created_at: new Date('2024-04-02T10:00:00Z'), product: hat, qty: 1 },
+    { user: support, status: 'completed', created_at: new Date('2024-05-20T16:00:00Z'), product: scarf, qty: 1 },
 ]
 for (const row of tickets) {
     let order = await orders.findOne({ where: { user: { id: row.user.id }, status: row.status } })

@@ -201,13 +201,13 @@ npm run report
 psql postgres://admin:admin-bootstrap-only@127.0.0.1:5432/marketplace -c "SELECT (SELECT count(*) FROM users) AS users, (SELECT count(*) FROM products) AS products, (SELECT count(*) FROM orders) AS orders;"
 ```
 
-Очікувані count: users **3**, products **3**, orders **3**.
+Очікувані count: users **5**, products **5**, orders **5**.
 
 `npm run demo:nplus1` друкує два числа (SQL до / після):
 
 | | запитів |
 |---|---|
-| наївно (список + цикл items/product) | 4 |
+| наївно (список + цикл items/product) | 6 |
 | `find({ relations: ['items', 'items.product'] })` | 1 |
 
 `find()` — коли потрібні рядки entity з relations (картка замовлення, список). QueryBuilder + `GROUP BY` — коли потрібен агрегат (виторг по продавцю); це не зібрати через `find()`.

@@ -6,7 +6,7 @@ import type { User } from './user.entity.js'
 export class Product {
   @PrimaryGeneratedColumn('identity', { type: 'bigint' })
   id!: string
-  @ManyToOne('User', 'products', { onDelete: 'RESTRICT' })
+  @ManyToOne('User', 'products', { onDelete: 'RESTRICT', nullable: false })
   @JoinColumn({ name: 'seller_id' })
   seller!: Relation<User>
   @Column({ type: 'text', unique: false })

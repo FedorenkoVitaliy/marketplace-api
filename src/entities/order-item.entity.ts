@@ -9,10 +9,10 @@ import type { Product } from './product.entity.js'
 export class OrderItem {
   @PrimaryGeneratedColumn('identity', { type: 'bigint' })
   id!: string
-  @ManyToOne('Order', 'items', { onDelete: 'CASCADE' })
+  @ManyToOne('Order', 'items', { onDelete: 'CASCADE', nullable: false })
   @JoinColumn({ name: 'order_id' })
   order!: Relation<Order>
-  @ManyToOne('Product', { onDelete: 'RESTRICT' })
+  @ManyToOne('Product', { onDelete: 'RESTRICT', nullable: false })
   @JoinColumn({ name: 'product_id' })
   product!: Relation<Product>
   @Column({ type: 'int'})

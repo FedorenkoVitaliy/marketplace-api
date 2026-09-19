@@ -10,7 +10,7 @@ import type { OrderItem } from './order-item.entity.js'
 export class Order {
   @PrimaryGeneratedColumn('identity', { type: 'bigint' })
   id!: string
-  @ManyToOne('User', 'orders', { onDelete: 'RESTRICT' })
+  @ManyToOne('User', 'orders', { onDelete: 'RESTRICT', nullable: false })
   @JoinColumn({ name: 'user_id' })
   user!: User
   @Column({ type: 'text'})
