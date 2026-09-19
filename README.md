@@ -46,7 +46,7 @@ User stories:
 
 Не став Infisical стіною секретів: у LMS цього ДЗ це бонус без балів, а обовʼязковий прийом — файл + `password: async () => readFile()`. Сховище можна додати, не викидаючи файл: env як і раніше замерзне на старті, пароль БД — ні.
 
-Не переніс каталог у Postgres на цьому кроці. Пул і `/db` доводять, що процес читає секрет з файла; схема таблиць — ДЗ#12. Інакше зараз змішались би «конфіг» і «модель».
+Не переніс каталог у Postgres на ДЗ#11: тоді треба було довести пул і секрет. Схема й seed ≥100k — у `db/` цього ДЗ#12.
 
 Не віддав пароль у `DB_URL`. Рядок підключення в env заморожується разом із процесом; ротація тоді вимагала б рестарту. Файл перечитується драйвером на handshake.
 
@@ -68,6 +68,22 @@ Zod-схема `src/config/env.schema.ts` — єдине місце, яке чи
 | пароль `app_user` | файл `secrets/db_password` (gitignored) | кожне **нове** зʼєднання пулу |
 
 `.env` і `secrets/` не в git і не в Docker-образі. Перевірка ключів прикладу: `npm run check:env` (має надрукувати `sync`).
+
+### Підняти Postgres
+
+Свіжий клон, без `.env` і без `secrets/db_password`. Пароль `admin` уже в `docker-compose.yml`.
+
+```bash
+docker compose up -d --wait
+```
+
+```bash
+docker compose exec -T db psql -U admin -d marketplace -Atc "SELECT 1"
+```
+
+Має надрукувати `1`.
+
+Головна таблиця обсягу — `orders` (≥100 000 рядків). Повнотекстовий пошук — таблиця `products` (`search_vector` + GIN). Схема/дані/запити: `db/schema.sql`, `db/seed.sql`, `db/queries/`, `db/indexes.sql`. Підключення застосунку як і в ДЗ#11: `DB_URL` у `.env` (зразок `.env.example`), окремого env-файла немає.
 
 ### Запуск
 
@@ -159,3 +175,4 @@ curl -sS -D - -X POST http://localhost:3000/orders \
 
 - **ДЗ#9.** Spec-first, варіант Б (`express-openapi-validator`), in-memory Product/Order, cursor + Idempotency-Key + problem+json. Swagger UI прибрано: валідатор лишився єдиним примусом.
 - **ДЗ#11.** Nest як оболонка, Zod env fail-fast, пароль БД з файла, Compose Postgres, `rotate.sh`. Infisical не підключав (бонус LMS). Таблиці домену ще не в Postgres — свідомо до ДЗ#12.
+- **ДЗ#12.** Сирий SQL у `db/`: схема, seed ≥100k на `orders` і `products`, q1–q4, індекси, `OPTIMIZATIONS.md`. `DB_URL` той самий, що в ДЗ#11.
