@@ -176,3 +176,42 @@ curl -sS -D - -X POST http://localhost:3000/orders \
 - **ДЗ#9.** Spec-first, варіант Б (`express-openapi-validator`), in-memory Product/Order, cursor + Idempotency-Key + problem+json. Swagger UI прибрано: валідатор лишився єдиним примусом.
 - **ДЗ#11.** Nest як оболонка, Zod env fail-fast, пароль БД з файла, Compose Postgres, `rotate.sh`. Infisical не підключав (бонус LMS). Таблиці домену ще не в Postgres — свідомо до ДЗ#12.
 - **ДЗ#12.** Сирий SQL у `db/`: схема, seed ≥100k на `orders` і `products`, q1–q4, індекси, `OPTIMIZATIONS.md`. `DB_URL` той самий, що в ДЗ#11.
+- **ДЗ#13.** TypeORM entities + міграція `InitSchema` (`synchronize: false`). Ідемпотентний `seed`, демо N+1, звіт QueryBuilder. Грейдер ставить схему через `npm run migrate`, не `psql -f db/schema.sql`. Ціна в entity — integer копійки.
+
+## Grading
+
+Грейдер клонує гілку `hw-13`. Infisical у раннері немає — `SKIP_VAULT=1` лише прокидає вже виставлені `DB_*`.
+
+```bash
+docker compose up -d --wait
+export DB_HOST=127.0.0.1 DB_PORT=5432 DB_USER=admin DB_PASSWORD=admin-bootstrap-only DB_NAME=marketplace
+export SKIP_VAULT=1
+npm ci
+npx tsc --noEmit
+npm run build
+npm run migrate
+npm run seed && npm run seed
+npm run demo:nplus1
+npm run report
+```
+
+Після двох `seed` кількість рядків не росте:
+
+```bash
+psql postgres://admin:admin-bootstrap-only@127.0.0.1:5432/marketplace -c "SELECT (SELECT count(*) FROM users) AS users, (SELECT count(*) FROM products) AS products, (SELECT count(*) FROM orders) AS orders;"
+```
+
+Очікувані count: users **3**, products **3**, orders **3**.
+
+`npm run demo:nplus1` друкує два числа (SQL до / після):
+
+| | запитів |
+|---|---|
+| наївно (список + цикл items/product) | 4 |
+| `find({ relations: ['items', 'items.product'] })` | 1 |
+
+`find()` — коли потрібні рядки entity з relations (картка замовлення, список). QueryBuilder + `GROUP BY` — коли потрібен агрегат (виторг по продавцю); це не зібрати через `find()`.
+
+`onDelete: 'RESTRICT'` на `seller` / `user` / `product`: не можна дропнути користувача чи товар, поки на них є замовлення чи лот. `CASCADE` лише на `order_items.order`: рядки чека зникають разом із замовленням, не лишають сиріт.
+
+У DataSource `synchronize: false` заданий явно. Дефолт TypeORM теж `false`; `true` у цьому ДЗ не вмикати — схему ставить лише `migration:run`.

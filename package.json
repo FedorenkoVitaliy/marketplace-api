@@ -13,7 +13,9 @@
     "migrate": "bash scripts/with-secrets.sh dev node ./node_modules/typeorm/cli.js migration:run -d dist/src/data-source.js",
     "migrate:show": "bash scripts/with-secrets.sh dev node ./node_modules/typeorm/cli.js migration:show -d dist/src/data-source.js",
     "migrate:revert": "bash scripts/with-secrets.sh dev node ./node_modules/typeorm/cli.js migration:revert -d dist/src/data-source.js",
-    "seed": "bash scripts/with-secrets.sh dev node dist/src/seed.js"
+    "seed": "bash scripts/with-secrets.sh dev node dist/src/seed.js",
+    "demo:nplus1": "bash scripts/with-secrets.sh dev node dist/src/demo-nplus1.js",
+    "report": "bash scripts/with-secrets.sh dev node dist/src/report.js"
 
   },
   "engines": {
