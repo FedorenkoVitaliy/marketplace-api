@@ -53,7 +53,13 @@ const tickets = [
     { user: support, status: 'completed', created_at: new Date('2024-05-20T16:00:00Z'), product: scarf, qty: 1 },
 ]
 for (const row of tickets) {
-    let order = await orders.findOne({ where: { user: { id: row.user.id }, status: row.status } })
+    let order = await orders.findOne({
+        where: {
+            user: { id: row.user.id },
+            status: row.status,
+            created_at: row.created_at,
+        },
+    })
     if (!order) {
         order = orders.create({
             user: row.user,
