@@ -9,7 +9,14 @@
     "typecheck": "tsc --noEmit",
     "start": "tsc && node dist/src/main.js",
     "check:env": "tsc && node scripts/check-env-example.mjs",
-    "test": "tsc && node --test \"dist/test/**/*.test.js\""
+    "test": "tsc && node --test \"dist/test/**/*.test.js\"",
+    "migrate": "bash scripts/with-secrets.sh dev node ./node_modules/typeorm/cli.js migration:run -d dist/src/data-source.js",
+    "migrate:show": "bash scripts/with-secrets.sh dev node ./node_modules/typeorm/cli.js migration:show -d dist/src/data-source.js",
+    "migrate:revert": "bash scripts/with-secrets.sh dev node ./node_modules/typeorm/cli.js migration:revert -d dist/src/data-source.js",
+    "seed": "bash scripts/with-secrets.sh dev node dist/src/seed.js",
+    "demo:nplus1": "bash scripts/with-secrets.sh dev node dist/src/demo-nplus1.js",
+    "report": "bash scripts/with-secrets.sh dev node dist/src/report.js"
+
   },
   "engines": {
     "node": ">=22"
@@ -34,6 +41,7 @@
     "pg": "^8.23.0",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.2",
+    "typeorm": "^0.3.31",
     "zod": "^4.5.4"
   }
 }
