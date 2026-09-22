@@ -177,10 +177,11 @@ curl -sS -D - -X POST http://localhost:3000/orders \
 - **ДЗ#11.** Nest як оболонка, Zod env fail-fast, пароль БД з файла, Compose Postgres, `rotate.sh`. Infisical не підключав (бонус LMS). Таблиці домену ще не в Postgres — свідомо до ДЗ#12.
 - **ДЗ#12.** Сирий SQL у `db/`: схема, seed ≥100k на `orders` і `products`, q1–q4, індекси, `OPTIMIZATIONS.md`. `DB_URL` той самий, що в ДЗ#11.
 - **ДЗ#13.** TypeORM entities + міграція `InitSchema` (`synchronize: false`). Ідемпотентний `seed`, демо N+1, звіт QueryBuilder. Грейдер ставить схему через `npm run migrate`, не `psql -f db/schema.sql`. Ціна в entity — integer копійки.
+- **ДЗ#14.** `products.stock`, checkout у транзакції (атомарний `UPDATE … RETURNING`), `withRetry` на `40001`/`40P01`, черга `jobs` через `FOR UPDATE SKIP LOCKED`. Підключення як у #13: `with-secrets.sh`, нових env немає.
 
 ## Grading
 
-Грейдер клонує гілку `hw-13`. Infisical у раннері немає — `SKIP_VAULT=1` лише прокидає вже виставлені `DB_*`.
+Грейдер клонує гілку `hw-14`. Infisical у раннері немає — `SKIP_VAULT=1` лише прокидає вже виставлені `DB_*`. Нових env-файлів немає.
 
 ```bash
 docker compose up -d --wait
@@ -190,28 +191,35 @@ npm ci
 npx tsc --noEmit
 npm run build
 npm run migrate
-npm run seed && npm run seed
-npm run demo:nplus1
-npm run report
+npm run seed
+npm run demo:lost-update
+npm run demo:concurrent
+npm run demo:skip-locked
 ```
 
-Після двох `seed` кількість рядків не росте:
+`products.stock` — integer, `CHECK (stock >= 0)`, міграція `AddProductStock` (`DEFAULT 0` для вже існуючих рядків). Seed: кросівки `2`, решта `10`.
 
-```bash
-psql postgres://admin:admin-bootstrap-only@127.0.0.1:5432/marketplace -c "SELECT (SELECT count(*) FROM users) AS users, (SELECT count(*) FROM products) AS products, (SELECT count(*) FROM orders) AS orders;"
+Checkout: `QueryRunner` + атомарний `UPDATE products SET stock = stock - $qty WHERE id = $id AND stock >= $qty RETURNING *`. Нуль рядків → `out of stock`, rollback. `withRetry` ловить лише Postgres `40001` / `40P01`.
+
+`npm run demo:lost-update` (два паралельні checkout, `stock=2`):
+
+```
+фінал stock = 0 (очікували 0)
 ```
 
-Очікувані count: users **5**, products **5**, orders **5**.
+`npm run demo:concurrent` (10 покупців, 5 пар):
 
-`npm run demo:nplus1` друкує два числа (SQL до / після):
+```
+успіхів 5, відмов 5, фінал stock = 0
+```
 
-| | запитів |
-|---|---|
-| наївно (список + цикл items/product) | 6 |
-| `find({ relations: ['items', 'items.product'] })` | 1 |
+`npm run demo:skip-locked` (12 задач × 100 мс, 4 воркери; ідеал 300 мс, послідовно 1200 мс):
 
-`find()` — коли потрібні рядки entity з relations (картка замовлення, список). QueryBuilder + `GROUP BY` — коли потрібен агрегат (виторг по продавцю); це не зібрати через `find()`.
+```
+FOR UPDATE  1279 мс · w1=6 w4=6 · оброблено двічі: 0
+SKIP LOCKED 327 мс · w1=3 w2=3 w3=3 w4=3 · оброблено двічі: 0
+```
 
-`onDelete: 'RESTRICT'` на `seller` / `user` / `product`: не можна дропнути користувача чи товар, поки на них є замовлення чи лот. `CASCADE` лише на `order_items.order`: рядки чека зникають разом із замовленням, не лишають сиріт.
+Мілісекунди плавають; знак ефекту стабільний: SKIP LOCKED швидший, дублів немає, розподіл рівний.
 
-У DataSource `synchronize: false` заданий явно. Дефолт TypeORM теж `false`; `true` у цьому ДЗ не вмикати — схему ставить лише `migration:run`.
+У DataSource `synchronize: false`. Схему ставить лише `migration:run`.

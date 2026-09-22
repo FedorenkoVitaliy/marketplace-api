@@ -16,6 +16,8 @@
     "seed": "bash scripts/with-secrets.sh dev node dist/src/seed.js",
     "checkout": "bash scripts/with-secrets.sh dev node dist/src/checkout.js",
     "demo:lost-update": "bash scripts/with-secrets.sh dev node dist/src/demo-lost-update.js",
+    "demo:concurrent": "bash scripts/with-secrets.sh dev node dist/src/demo-concurrent.js",
+    "demo:skip-locked": "bash scripts/with-secrets.sh dev node dist/src/demo-skip-locked.js",
     "demo:nplus1": "bash scripts/with-secrets.sh dev node dist/src/demo-nplus1.js",
     "report": "bash scripts/with-secrets.sh dev node dist/src/report.js"
 
