@@ -4,18 +4,27 @@ import { Order } from './entities/order.entity.js'
 import { OrderItem } from './entities/order-item.entity.js'
 import { Product } from './entities/product.entity.js'
 import { withRetry } from './lib/retry.js'
+import { Job } from './entities/job.entity.js'
 
 
 export async function checkout({ userId, productId, qty, delayMs = 0 }: { userId: string; productId: string; qty: number, delayMs?: number }) {
     const qr = dataSource.createQueryRunner()
     await qr.connect()
-    await qr.startTransaction()
+    await qr.startTransaction('REPEATABLE READ')
+    
 
     try { 
         const users = qr.manager.getRepository(User);
         const orders = qr.manager.getRepository(Order);
         const orderItems = qr.manager.getRepository(OrderItem);
         const products = qr.manager.getRepository(Product);
+        const jobs = qr.manager.getRepository(Job)
+
+        await products.findOneByOrFail({ id: productId })
+
+        if (delayMs) {
+            await new Promise((r) => setTimeout(r, delayMs))
+        }
         
         const updated = await qr.manager.query(
             `UPDATE products SET stock = stock - $1
@@ -45,6 +54,11 @@ export async function checkout({ userId, productId, qty, delayMs = 0 }: { userId
             unit_price: product.price,
         })
         await orderItems.save(item)
+        const job = jobs.create({
+            payload: `order:${order.id}`,
+            status: 'new',
+          })
+          await jobs.save(job)
         await qr.commitTransaction()
     } catch (e) {
         await qr.rollbackTransaction()

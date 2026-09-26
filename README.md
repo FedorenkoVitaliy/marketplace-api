@@ -177,7 +177,15 @@ curl -sS -D - -X POST http://localhost:3000/orders \
 - **ДЗ#11.** Nest як оболонка, Zod env fail-fast, пароль БД з файла, Compose Postgres, `rotate.sh`. Infisical не підключав (бонус LMS). Таблиці домену ще не в Postgres — свідомо до ДЗ#12.
 - **ДЗ#12.** Сирий SQL у `db/`: схема, seed ≥100k на `orders` і `products`, q1–q4, індекси, `OPTIMIZATIONS.md`. `DB_URL` той самий, що в ДЗ#11.
 - **ДЗ#13.** TypeORM entities + міграція `InitSchema` (`synchronize: false`). Ідемпотентний `seed`, демо N+1, звіт QueryBuilder. Грейдер ставить схему через `npm run migrate`, не `psql -f db/schema.sql`. Ціна в entity — integer копійки.
-- **ДЗ#14.** `products.stock`, checkout у транзакції (атомарний `UPDATE … RETURNING`), `withRetry` на `40001`/`40P01`, черга `jobs` через `FOR UPDATE SKIP LOCKED`. Підключення як у #13: `with-secrets.sh`, нових env немає.
+- **ДЗ#14.** `products.stock`, checkout у `REPEATABLE READ` (атомарний `UPDATE … RETURNING` + `INSERT` у `jobs`), `withRetry` на `40001`/`40P01`, черга `jobs` через `FOR UPDATE SKIP LOCKED`. Підключення як у #13: `with-secrets.sh`, нових env немає.
+
+## Конкурентності
+
+Checkout тримає `REPEATABLE READ`, не дефолтний READ COMMITTED. Два покупці читають той самий `stock`, потім пишуть: під READ COMMITTED другий просто перезапише рядок і «загубить» чужий апдейт або тихо спише після чужого коміту. REPEATABLE READ фіксує знімок на першому `SELECT`; якщо рядок уже змінили — Postgres кидає `40001` (serialization_failure). Це не баг, а команда «почни транзакцію з нуля». `withRetry` ловить лише `40001` і deadlock `40P01`, з backoff. Інші помилки (немає товару) не крутить.
+
+Списання — один `UPDATE … WHERE stock >= $qty RETURNING`, не «прочитав у JS → записав». Вікна між перевіркою і записом немає; `CHECK (stock >= 0)` — страховка, якщо хтось обійде checkout. У тій самій транзакції пишеться `jobs` (`payload = order:<id>`): відкотився checkout — задачі теж немає. Воркери забирають `new` через `FOR UPDATE SKIP LOCKED`, інакше чотири процеси стоять у черзі за одним рядком.
+
+`demo:race`: 50 спроб на 10 штук. Успіхів стільки, скільки було stock; негативних рядків 0. `demo:retry`: навмисна пауза після `SELECT`, щоб два checkout перетнулись і було видно `40001`. `demo:workers`: той самий пул із і без `SKIP LOCKED` — час і розподіл по `w1…w4`.
 
 ## Grading
 
@@ -199,18 +207,21 @@ npm run demo:workers
 
 `products.stock` — integer, `CHECK (stock >= 0)`, міграція `AddProductStock` (`DEFAULT 0` для вже існуючих рядків). Seed: кросівки `2`, решта `10`.
 
-Checkout: `QueryRunner` + атомарний `UPDATE products SET stock = stock - $qty WHERE id = $id AND stock >= $qty RETURNING *`. Нуль рядків → `out of stock`, rollback. `withRetry` ловить лише Postgres `40001` / `40P01`.
+Checkout: `QueryRunner`, `REPEATABLE READ`, атомарний `UPDATE products SET stock = stock - $qty WHERE id = $id AND stock >= $qty RETURNING *`. Нуль рядків → `out of stock`, rollback. У тій же tx — рядок у `jobs`. `withRetry` ловить лише Postgres `40001` / `40P01`.
 
 `npm run demo:retry` (два паралельні checkout, `stock=2`):
 
 ```
+спроба 1 впала: 40001 → retry через 68 мс
 фінал stock = 0 (очікували 0)
 ```
 
-`npm run demo:race` (10 покупців, 5 пар):
+Мілісекунди backoff плавають; має бути код `40001` і фінал `0`.
+
+`npm run demo:race` (50 спроб, `stock=10`):
 
 ```
-успіхів 5, відмов 5, фінал stock = 0
+успіхів 10, відмов 40, фінал stock = 0,  негативних 0
 ```
 
 `npm run demo:workers` (12 задач × 100 мс, 4 воркери; ідеал 300 мс, послідовно 1200 мс):
