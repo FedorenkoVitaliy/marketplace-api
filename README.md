@@ -192,28 +192,28 @@ npx tsc --noEmit
 npm run build
 npm run migrate
 npm run seed
-npm run demo:lost-update
-npm run demo:concurrent
-npm run demo:skip-locked
+npm run demo:retry
+npm run demo:race
+npm run demo:workers
 ```
 
 `products.stock` — integer, `CHECK (stock >= 0)`, міграція `AddProductStock` (`DEFAULT 0` для вже існуючих рядків). Seed: кросівки `2`, решта `10`.
 
 Checkout: `QueryRunner` + атомарний `UPDATE products SET stock = stock - $qty WHERE id = $id AND stock >= $qty RETURNING *`. Нуль рядків → `out of stock`, rollback. `withRetry` ловить лише Postgres `40001` / `40P01`.
 
-`npm run demo:lost-update` (два паралельні checkout, `stock=2`):
+`npm run demo:retry` (два паралельні checkout, `stock=2`):
 
 ```
 фінал stock = 0 (очікували 0)
 ```
 
-`npm run demo:concurrent` (10 покупців, 5 пар):
+`npm run demo:race` (10 покупців, 5 пар):
 
 ```
 успіхів 5, відмов 5, фінал stock = 0
 ```
 
-`npm run demo:skip-locked` (12 задач × 100 мс, 4 воркери; ідеал 300 мс, послідовно 1200 мс):
+`npm run demo:workers` (12 задач × 100 мс, 4 воркери; ідеал 300 мс, послідовно 1200 мс):
 
 ```
 FOR UPDATE  1279 мс · w1=6 w4=6 · оброблено двічі: 0
