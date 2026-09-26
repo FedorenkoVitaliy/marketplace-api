@@ -32,8 +32,8 @@ const negatives = Number(negRows[0]?.n)
 
 
 
-console.log(`успіхів ${ok}, відмов ${fail}, фінал stock = ${after.stock},  негативних ${negatives}`)
+console.log(`спроб ${results.length}, успіхів ${ok}, відмов ${fail}, фінал stock = ${after.stock}, негативних ${negatives}`)
 
 await dataSource.destroy()
-process.exit(negatives > 0 || after.stock < 0 ? 1 : 0)
+process.exit(negatives > 0 || after.stock < 0 || ok !== 10 ? 1 : 0)
 

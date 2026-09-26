@@ -14,6 +14,7 @@ for (const userName of userNames) {
     if (!user) {
         user = users.create({ email })
       }
+    user.balance = 100_000_000
     await users.save(user)
 }
 

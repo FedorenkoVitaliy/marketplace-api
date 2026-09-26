@@ -13,6 +13,7 @@ const boots = await products.findOneByOrFail({ name: 'Шкіряні кросі�
 
 boots.stock = 2
 await products.save(boots)
+const balanceBefore = buyer.balance
 
 await Promise.all([
   withRetry(() => checkout({ userId: buyer.id, productId: boots.id, qty: 1, delayMs: 150 })),
@@ -20,6 +21,10 @@ await Promise.all([
 ])
 
 const after = await products.findOneByOrFail({ id: boots.id })
+const buyerAfter = await users.findOneByOrFail({ id: buyer.id })
+const expectedBalance = balanceBefore - 2 * boots.price
 console.log(`фінал stock = ${after.stock} (очікували 0)`)
+console.log(`баланс ${balanceBefore} → ${buyerAfter.balance} (очікували ${expectedBalance})`)
 
 await dataSource.destroy()
+process.exit(after.stock === 0 && buyerAfter.balance === expectedBalance ? 0 : 1)

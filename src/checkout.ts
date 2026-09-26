@@ -38,6 +38,16 @@ export async function checkout({ userId, productId, qty, delayMs = 0 }: { userId
             throw new Error('out of stock')
         }
         const product = rows[0]
+
+        const [, paidCount] = await qr.manager.query(
+            `UPDATE users SET balance = balance - $1
+                WHERE id = $2 AND balance >= $1
+                RETURNING id`,
+            [product.price * qty, userId],
+        )
+        if (!paidCount) {
+            throw new Error('insufficient funds')
+        }
     
         const user = await users.findOneByOrFail({ id: userId });
         const order = orders.create({
