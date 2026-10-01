@@ -16,7 +16,7 @@ await products.save(boots)
 
 const results = await Promise.allSettled(
   Array.from({ length: 50 }, async() =>
-    await withRetry(() => checkout({ userId: buyer.id, productId: boots.id, qty: 1 }))
+    await withRetry(() => checkout({ userId: buyer.id, productId: boots.id, qty: 1 }), 10)
   ),
 )
 
