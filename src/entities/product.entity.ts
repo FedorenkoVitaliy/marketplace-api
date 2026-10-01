@@ -3,6 +3,7 @@ import type { User } from './user.entity.js'
 
 @Entity({ name: 'products' })
 @Check(`"price" > 0`)
+@Check(`"stock" >= 0`)
 export class Product {
   @PrimaryGeneratedColumn('identity', { type: 'bigint' })
   id!: string
@@ -15,6 +16,8 @@ export class Product {
   description!: string
   @Column({ type: 'int', unique: false })
   price!: number
+  @Column({ type: 'int', unique: false })
+  stock!: number
   @Column({ type: 'timestamptz', default: () => 'now()' })
   created_at!: Date
   @Column({

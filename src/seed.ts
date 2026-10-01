@@ -14,23 +14,25 @@ for (const userName of userNames) {
     if (!user) {
         user = users.create({ email })
       }
+    user.balance = 100_000_000
     await users.save(user)
 }
 
 const seller = await users.findOneByOrFail({ email: 'seller@shop.test' })
 const products = dataSource.getRepository(Product);
 const catalog = [
-    { name: 'Шкіряні кросівки', description: 'Демісезонні', price: 129900 },
-    { name: 'Зимова куртка', description: 'Пухова', price: 450000 },
-    { name: 'Рюкзак', description: 'Міський', price: 89000 },
-    { name: 'Шапка', description: 'Вовна', price: 25000 },
-    { name: 'Шарф', description: 'Кашемір', price: 41000 },
+    { name: 'Шкіряні кросівки', description: 'Демісезонні', price: 129900,  stock: 2},
+    { name: 'Зимова куртка', description: 'Пухова', price: 450000, stock: 10 },
+    { name: 'Рюкзак', description: 'Міський', price: 89000, stock: 10 },
+    { name: 'Шапка', description: 'Вовна', price: 25000, stock: 10 },
+    { name: 'Шарф', description: 'Кашемір', price: 41000, stock: 10 },
   ]
   for (const row of catalog) {
     let product = await products.findOne({ where: { name: row.name } })
     if (!product) {
       product = products.create({ ...row, seller })
     }
+    product.stock = row.stock
     await products.save(product)
   }
 

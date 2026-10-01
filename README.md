@@ -177,10 +177,29 @@ curl -sS -D - -X POST http://localhost:3000/orders \
 - **ДЗ#11.** Nest як оболонка, Zod env fail-fast, пароль БД з файла, Compose Postgres, `rotate.sh`. Infisical не підключав (бонус LMS). Таблиці домену ще не в Postgres — свідомо до ДЗ#12.
 - **ДЗ#12.** Сирий SQL у `db/`: схема, seed ≥100k на `orders` і `products`, q1–q4, індекси, `OPTIMIZATIONS.md`. `DB_URL` той самий, що в ДЗ#11.
 - **ДЗ#13.** TypeORM entities + міграція `InitSchema` (`synchronize: false`). Ідемпотентний `seed`, демо N+1, звіт QueryBuilder. Грейдер ставить схему через `npm run migrate`, не `psql -f db/schema.sql`. Ціна в entity — integer копійки.
+- **ДЗ#14.** `products.stock`, `users.balance`, checkout у `REPEATABLE READ` (атомарні `UPDATE … RETURNING` на stock і баланс + order + `jobs`), `withRetry` на `40001`/`40P01`, черга `jobs` через `FOR UPDATE SKIP LOCKED`. Підключення як у #13: `with-secrets.sh`, нових env немає.
+
+## Конкурентність
+
+Одна транзакція checkout: `UPDATE products … stock >= $qty RETURNING` → `UPDATE users … balance >= $total RETURNING` → `INSERT` order і order_item → `INSERT` у `jobs` (`payload = order:<id>`). Нуль рядків у будь-якому `UPDATE` — `out of stock` або `insufficient funds` і rollback цілої транзакції: замовлень-сиріт немає, задачі без замовлення теж.
+
+**Atomic UPDATE, не `SELECT … FOR UPDATE`.** Перевірка залишку і списання — один запит, тому вікна «прочитав → вирішив у JS → записав» немає. `FOR UPDATE` дав би той самий результат, але це два запити й лок, який тримається, поки Node думає між ними. Нам не треба показувати залишок користувачу до списання, тож досить умови в `WHERE`. `CHECK (stock >= 0)` і `CHECK (balance >= 0)` — страховка, якщо хтось обійде checkout.
+
+**Чому retry ловить лише `40001` і `40P01`.** Checkout іде під `REPEATABLE READ`: знімок фіксується на першому `SELECT`, і якщо рядок змінила чужа закомічена транзакція, Postgres кидає `40001` (serialization_failure). `40P01` — deadlock, одну з транзакцій Postgres убиває сам. Обидва коди означають «транзакція правильна, повтори її цілком». Решта помилок (немає товару, немає грошей, порушений `CHECK`) при повторі дадуть те саме, тому `withRetry` їх одразу прокидає далі. Повтор іде з самого початку, разом із читанням, з експоненційним backoff і jitter.
+
+Числа з прогону 26.09.2026:
+
+| Демо | Результат |
+|---|---|
+| `demo:race` | спроб 50, успішних 10, фінальний stock 0, від’ємних 0; ~56 повторів `40001` за прогін |
+| `demo:retry` | 1 спійманий `40001` і повтор; stock 2 → 0, баланс −2 × ціна, збігається |
+| `demo:workers` | 12 задач × 100 мс: `SKIP LOCKED` 322 мс (3/3/3/3), `FOR UPDATE` 1269 мс (6/6), двічі оброблено 0 |
+
+Під `FOR UPDATE` без `SKIP LOCKED` воркери стоять у черзі за одним рядком: час ≈ послідовний. `SKIP LOCKED` бере наступну вільну задачу, тому час ≈ ідеал 300 мс. Транзакція воркера відкрита на час обробки: `done` і `processed + 1` комітяться разом. Порожній `SKIP LOCKED` означає «вільних зараз немає», тому воркер перепитує `count(*) WHERE status = 'new'` перед виходом.
 
 ## Grading
 
-Грейдер клонує гілку `hw-13`. Infisical у раннері немає — `SKIP_VAULT=1` лише прокидає вже виставлені `DB_*`.
+Грейдер клонує гілку `hw-14`. Infisical у раннері немає — `SKIP_VAULT=1` лише прокидає вже виставлені `DB_*`. Нових env-файлів немає.
 
 ```bash
 docker compose up -d --wait
@@ -190,28 +209,35 @@ npm ci
 npx tsc --noEmit
 npm run build
 npm run migrate
-npm run seed && npm run seed
-npm run demo:nplus1
-npm run report
+npm run seed
+npm run demo:retry
+npm run demo:race
+npm run demo:workers
 ```
 
-Після двох `seed` кількість рядків не росте:
+`products.stock` і `users.balance` — integer з `CHECK (>= 0)`, міграції `AddProductStock` і `AddUserBalance` (`DEFAULT 0` для вже існуючих рядків). Seed: кросівки `2`, решта `10`; баланс кожного користувача `100 000 000` копійок, свідомо надлишковий — обмежує лише stock.
 
-```bash
-psql postgres://admin:admin-bootstrap-only@127.0.0.1:5432/marketplace -c "SELECT (SELECT count(*) FROM users) AS users, (SELECT count(*) FROM products) AS products, (SELECT count(*) FROM orders) AS orders;"
+`npm run demo:retry` (два паралельні checkout, `stock=2`; exit ≠ 0, якщо stock або баланс не зійшлися):
+
+```
+спроба 1 впала: 40001 → retry через 70 мс
+фінал stock = 0 (очікували 0)
+баланс 97402000 → 97142200 (очікували 97142200)
 ```
 
-Очікувані count: users **5**, products **5**, orders **5**.
+`npm run demo:race` (50 паралельних, `stock=10`; exit ≠ 0 при oversell, від’ємному stock або успіхах ≠ 10). Рядки `спроба N впала: 40001` — штатні повтори:
 
-`npm run demo:nplus1` друкує два числа (SQL до / після):
+```
+спроб 50, успіхів 10, відмов 40, фінал stock = 0, негативних 0
+```
 
-| | запитів |
-|---|---|
-| наївно (список + цикл items/product) | 6 |
-| `find({ relations: ['items', 'items.product'] })` | 1 |
+`npm run demo:workers` (12 задач × 100 мс, 4 воркери; ідеал 300 мс, послідовно 1200 мс):
 
-`find()` — коли потрібні рядки entity з relations (картка замовлення, список). QueryBuilder + `GROUP BY` — коли потрібен агрегат (виторг по продавцю); це не зібрати через `find()`.
+```
+FOR UPDATE  1269 мс · w1=6 w2=6 · оброблено двічі: 0
+SKIP LOCKED 322 мс · w1=3 w2=3 w3=3 w4=3 · оброблено двічі: 0
+```
 
-`onDelete: 'RESTRICT'` на `seller` / `user` / `product`: не можна дропнути користувача чи товар, поки на них є замовлення чи лот. `CASCADE` лише на `order_items.order`: рядки чека зникають разом із замовленням, не лишають сиріт.
+Мілісекунди плавають; знак ефекту стабільний: SKIP LOCKED швидший, дублів немає, розподіл рівний.
 
-У DataSource `synchronize: false` заданий явно. Дефолт TypeORM теж `false`; `true` у цьому ДЗ не вмикати — схему ставить лише `migration:run`.
+У DataSource `synchronize: false`. Схему ставить лише `migration:run`.
