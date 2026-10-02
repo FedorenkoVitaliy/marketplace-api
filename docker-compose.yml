@@ -22,6 +22,11 @@ services:
     depends_on:
       db:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "PGPASSWORD=admin-bootstrap-only psql -h 127.0.0.1 -p 5432 -U admin -d marketplace -c 'SELECT 1' >/dev/null"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
 
   restore:
     image: postgres:16-alpine

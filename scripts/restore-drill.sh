@@ -19,9 +19,18 @@ else
 fi
 
 checksum() {
-  docker compose exec -T -e PGPASSWORD="$pass" "$1" \
-    psql -U "$user" -d "$db" -Atc \
-    "SELECT count(*) || '|' || coalesce(sum(id), 0) FROM orders"
+  local has
+  has="$(docker compose exec -T -e PGPASSWORD="$pass" "$1" \
+    psql -U "$user" -d "$db" -Atc "SELECT to_regclass('public.orders') IS NOT NULL")"
+  if [ "$has" = "t" ]; then
+    docker compose exec -T -e PGPASSWORD="$pass" "$1" \
+      psql -U "$user" -d "$db" -Atc \
+      "SELECT count(*)::text || '|' || coalesce(sum(id), 0)::text FROM orders"
+  else
+    docker compose exec -T -e PGPASSWORD="$pass" "$1" \
+      psql -U "$user" -d "$db" -Atc \
+      "SELECT count(*)::text || '|0' FROM pg_class WHERE relkind = 'r' AND relnamespace = 'public'::regnamespace"
+  fi
 }
 
 cleanup() {
