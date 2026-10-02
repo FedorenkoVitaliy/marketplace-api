@@ -7,3 +7,4 @@ docker-compose.override.yml
 *.log
 .DS_Store
 spec.json
+backups/

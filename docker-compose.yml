@@ -22,3 +22,24 @@ services:
     depends_on:
       db:
         condition: service_healthy
+
+  restore:
+    image: postgres:16-alpine
+    profiles: ["drill"]
+    ports:
+      - "5433:5432"
+    environment:
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: admin-bootstrap-only
+      POSTGRES_DB: marketplace
+    volumes:
+      - pgdata-restore:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U admin -d marketplace"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+volumes:
+  pgdata-restore:
+    name: marketplace-pgdata-restore
