@@ -1,1 +1,1 @@
-0 3 * * * bash scripts/backup.sh
+0 3 * * * cd /Users/vitaliifedorenko/WebstormProjects/Study/marketplace-api && DATABASE_URL=postgres://admin:admin-bootstrap-only@127.0.0.1:6432/marketplace bash scripts/backup.sh

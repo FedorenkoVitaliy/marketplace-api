@@ -10,7 +10,7 @@ pass="$(node -e "console.log(decodeURIComponent(new URL(process.argv[1]).passwor
 db="$(node -e "console.log(new URL(process.argv[1]).pathname.replace(/^\//, ''))" "$DATABASE_URL")"
 
 mkdir -p backups
-out="$ROOT/backups/marketplace-$(date +%Y-%m-%d).dump"
+out="$ROOT/backups/marketplace-$(date +%Y-%m-%d-%H%M%S).dump"
 
 docker compose exec -T -e PGPASSWORD="$pass" db \
   pg_dump -U "$user" -d "$db" -Fc > "$out"

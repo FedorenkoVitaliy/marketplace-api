@@ -262,4 +262,4 @@ bash scripts/with-secrets.sh dev bash scripts/backup.sh
 bash scripts/with-secrets.sh dev bash scripts/restore-drill.sh
 ```
 
-`backup.sh` друкує шлях `backups/marketplace-YYYY-MM-DD.dump`. `pg_restore --list` по цьому файлу показує TOC. `restore-drill.sh` друкує `MATCH` і код 0; повторний запуск теж. Числа RTO/RPO — у `RESTORE-DRILL.md`.
+`backup.sh` друкує шлях `backups/marketplace-YYYY-MM-DD-HHMMSS.dump`. Другий запуск того ж дня пише новий файл, не затирає попередній. `pg_restore --list` по цьому файлу показує TOC. `restore-drill.sh` друкує `MATCH` і код 0; повторний запуск теж. Числа RTO/RPO — у `RESTORE-DRILL.md`.
