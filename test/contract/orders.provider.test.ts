@@ -6,6 +6,7 @@ import { Verifier } from '@pact-foundation/pact';
 import { Pool } from 'pg';
 import { createHttpApp } from '../../src/main.js';
 import { startPg } from '../integration/pg.js';
+import { seedCatalog } from '../integration/seed-catalog.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 const pactFile = path.join(root, 'pacts', 'marketplace-web-marketplace-api.json');
@@ -41,10 +42,10 @@ describe('verify marketplace-api', () => {
         logLevel: 'warn',
         stateHandlers: {
           'buyer exists': async () => {
-            await seed.query(
-              `INSERT INTO users (email) VALUES ('pact-buyer@example.com')
-               ON CONFLICT (email) DO NOTHING`,
-            );
+            await seedCatalog(seed, {
+              buyerEmail: 'pact-buyer@example.com',
+              sellerEmail: 'seller@shop.test',
+            });
           },
         },
         ...(broker

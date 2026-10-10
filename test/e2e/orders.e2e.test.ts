@@ -7,6 +7,7 @@ import request from 'supertest';
 import { AppModule } from '../../src/app.module.js';
 import { mountHttp } from '../../src/main.js';
 import { startPg } from '../integration/pg.js';
+import { seedCatalog } from '../integration/seed-catalog.js';
 
 describe('POST /orders', () => {
   let pg: Awaited<ReturnType<typeof startPg>>;
@@ -19,6 +20,7 @@ describe('POST /orders', () => {
     process.env.DB_URL = pg.uri;
     process.env.PORT = '3216';
     process.env.LOG_LEVEL = 'error';
+    await seedCatalog(pg.pool, { buyerEmail: 'buyer@e2e.test', sellerEmail: 'seller@e2e.test' });
 
     http = express();
     mountHttp(http);
