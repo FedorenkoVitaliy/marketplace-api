@@ -22,7 +22,6 @@
     "watch:pools": "bash scripts/watch-pools.sh",
     "demo:nplus1": "bash scripts/with-secrets.sh dev node dist/src/demo-nplus1.js",
     "report": "bash scripts/with-secrets.sh dev node dist/src/report.js"
-
   },
   "engines": {
     "node": ">=22"
@@ -31,6 +30,7 @@
   "author": "",
   "license": "ISC",
   "devDependencies": {
+    "@testcontainers/postgresql": "^12.1.0",
     "@types/express": "^5.0.6",
     "@types/node": "^26.2.0",
     "@types/pg": "^8.23.1",
