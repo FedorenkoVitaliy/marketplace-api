@@ -15,6 +15,14 @@ test('міграції створюють orders, куди можна встав
       ['pending', user.rows[0].id],
     );
     assert.deepEqual(inserted.rows, [{ id: '1', status: 'pending' }]);
+
+    await assert.rejects(
+      pg.pool.query(
+        `INSERT INTO orders (status, created_at, user_id) VALUES ('nope', now(), $1)`,
+        [user.rows[0].id],
+      ),
+      /orders_status|CHK_|check constraint/i,
+    );
   } finally {
     await pg.stop();
   }

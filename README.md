@@ -66,6 +66,8 @@ Zod-схема `src/config/env.schema.ts` — єдине місце, яке чи
 | `DB_URL` | `.env` | старт, host/user/db з URL; пароль з URL **не** йде в `pg.Pool` (інакше затре функцію з файла) |
 | `LOG_LEVEL` | `.env`, дефолт `info` | старт |
 | пароль `app_user` | файл `secrets/db_password` (gitignored) | кожне **нове** зʼєднання пулу |
+| `PACT_BROKER_URL` | сховище, локально дефолт `http://127.0.0.1:21620` | скрипт `can-i-deploy`, не новий env-файл |
+| `PACT_BROKER_TOKEN` | сховище (у локального брокера порожньо) | заголовок брокера, у git його немає |
 
 `.env` і `secrets/` не в git і не в Docker-образі. Перевірка ключів прикладу: `npm run check:env` (має надрукувати `sync`).
 
@@ -179,6 +181,7 @@ curl -sS -D - -X POST http://localhost:3000/orders \
 - **ДЗ#13.** TypeORM entities + міграція `InitSchema` (`synchronize: false`). Ідемпотентний `seed`, демо N+1, звіт QueryBuilder. Грейдер ставить схему через `npm run migrate`, не `psql -f db/schema.sql`. Ціна в entity — integer копійки.
 - **ДЗ#14.** `products.stock`, `users.balance`, checkout у `REPEATABLE READ` (атомарні `UPDATE … RETURNING` на stock і баланс + order + `jobs`), `withRetry` на `40001`/`40P01`, черга `jobs` через `FOR UPDATE SKIP LOCKED`. Підключення як у #13: `with-secrets.sh`, нових env немає.
 - **ДЗ#15.** PgBouncer (`pool_mode = transaction`, порт хоста `6432`) перед Postgres. `scripts/backup.sh` знімає `pg_dump -Fc` у `backups/`, `backup.cron` запускає його о 03:00. `scripts/restore-drill.sh` піднімає чистий контейнер `restore`, звіряє `orders` і друкує `MATCH`. Нових env-файлів немає: у `.env.example` змінився лише порт.
+- **ДЗ#16.** Integration-тест піднімає Postgres через testcontainers і проганяє міграції. E2E `POST /orders` йде через supertest у повний Nest. Один Pact-контракт на цей самий виклик звіряється з `openapi/openapi.yaml`. Брокер (`docker compose --profile pact`) і `scripts/can-i-deploy.sh` у CI (`.github/workflows/pact.yml`). `PACT_BROKER_TOKEN` лише зі сховища.
 
 ## Data layer ops
 
@@ -263,3 +266,18 @@ bash scripts/with-secrets.sh dev bash scripts/restore-drill.sh
 ```
 
 `backup.sh` друкує шлях `backups/marketplace-YYYY-MM-DD-HHMMSS.dump`. Другий запуск того ж дня пише новий файл, не затирає попередній. `pg_restore --list` по цьому файлу показує TOC. `restore-drill.sh` друкує `MATCH` і код 0; повторний запуск теж. Числа RTO/RPO — у `RESTORE-DRILL.md`.
+
+### ДЗ#16
+
+Грейдер клонує гілку `hw-16`. Сховища немає: токен брокера порожній, локальний брокер на `21620`. Нових env-файлів немає.
+
+```bash
+npm ci
+npm test
+docker compose --profile pact up -d --wait broker
+export PACT_BROKER_URL=http://127.0.0.1:21620
+export PACT_BROKER_TOKEN=
+bash scripts/can-i-deploy.sh
+```
+
+`npm test` піднімає одноразовий Postgres, проганяє міграції, відхиляє `status = nope`, потім `POST /orders` з `Idempotency-Key` і тілом `{"items":[1]}` відповідає `201` з `id` і `total_cents`. Той самий виклик описаний у Pact (`marketplace-web` → `marketplace-api`) і перевірений на живому API. `can-i-deploy.sh` публікує контракт у брокер, записує результат перевірки і виходить з кодом 0, лише якщо `summary.deployable` є `true`.

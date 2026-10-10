@@ -17,8 +17,10 @@ export async function startPg() {
   });
   await dataSource.initialize();
   await dataSource.runMigrations();
-  const pool = new Pool({ connectionString: container.getConnectionUri() });
+  const uri = container.getConnectionUri();
+  const pool = new Pool({ connectionString: uri });
   return {
+    uri,
     pool,
     async stop() {
       await pool.end();

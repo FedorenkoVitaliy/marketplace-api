@@ -8,3 +8,4 @@ docker-compose.override.yml
 .DS_Store
 spec.json
 backups/
+pacts/

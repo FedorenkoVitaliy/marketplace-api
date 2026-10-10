@@ -1,0 +1,22 @@
+name: pact
+
+on:
+  pull_request:
+  push:
+
+jobs:
+  can-i-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci
+      - run: npm test
+      - run: docker compose --profile pact up -d --wait broker
+      - run: bash scripts/can-i-deploy.sh
+        env:
+          PACT_BROKER_URL: http://127.0.0.1:21620
+          PACT_BROKER_TOKEN: ${{ secrets.PACT_BROKER_TOKEN }}
+          GIT_COMMIT: ${{ github.sha }}
