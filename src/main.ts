@@ -8,6 +8,16 @@ import { ExpressAdapter } from '@nestjs/platform-express';
 import { AppModule } from './app.module.js';
 import { type Env } from './config/env.schema.js';
 
+export function mountHttp(app: Express): void {
+    app.use(express.json());
+    app.use(middleware({
+        apiSpec: 'openapi/openapi.yaml',
+        validateRequests: true,
+        validateResponses: true,
+        ignorePaths: (path: string) => path === '/health' || path === '/db',
+    }));
+}
+
 export async function createHttpApp(): Promise<{
     app: Express;
     listen: (port: number) => Promise<void>;
@@ -16,14 +26,7 @@ export async function createHttpApp(): Promise<{
     url: () => string;
 }> {
     const app = express();
-
-    app.use(express.json());
-    app.use(middleware({
-        apiSpec: 'openapi/openapi.yaml',
-        validateRequests: true,
-        validateResponses: true,
-        ignorePaths: (path: string) => path === '/health' || path === '/db',
-    }));
+    mountHttp(app);
 
     const nestApp = await NestFactory.create(
         AppModule,

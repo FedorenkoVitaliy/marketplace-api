@@ -8,10 +8,12 @@ export function createPool(connectionString: string) {
         port: Number(url.port) || 5432,
         user: decodeURIComponent(url.username),
         database: url.pathname.replace(/^\//, ''),
-        password: async () => {
-            const pass = await readFile(new URL('../../secrets/db_password', import.meta.url), 'utf8')
-            return pass.trim()
-        },
+        password: process.env.DATABASE_URL
+            ? decodeURIComponent(url.password)
+            : async () => {
+                const pass = await readFile(new URL('../../secrets/db_password', import.meta.url), 'utf8')
+                return pass.trim()
+            },
         max: 3,
     })
     pool.on('error', (err) => console.error(err.message))

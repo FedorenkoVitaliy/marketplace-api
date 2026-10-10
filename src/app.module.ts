@@ -28,7 +28,7 @@ import { HealthController } from './health.controller.js';
         provide: 'PG_POOL',
         inject: [ConfigService],
         useFactory: (config: ConfigService<Env, true>) =>
-          createPool(config.get('DB_URL', { infer: true })),
+          createPool(process.env.DATABASE_URL ?? config.get('DB_URL', { infer: true })),
       }
     ],
 })
