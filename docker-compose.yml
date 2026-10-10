@@ -47,7 +47,6 @@ services:
 
   broker-db:
     image: postgres:16-alpine
-    profiles: ["pact"]
     environment:
       POSTGRES_USER: broker
       POSTGRES_PASSWORD: broker
@@ -60,7 +59,6 @@ services:
 
   broker:
     image: pactfoundation/pact-broker:2.142.0-pactbroker2.120.0
-    profiles: ["pact"]
     ports:
       - "21620:9292"
     environment:

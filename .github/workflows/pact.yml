@@ -5,7 +5,7 @@ on:
   push:
 
 jobs:
-  can-i-deploy:
+  contract:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -13,10 +13,29 @@ jobs:
         with:
           node-version: 22
       - run: npm ci
-      - run: npm test
-      - run: docker compose --profile pact up -d --wait broker
-      - run: bash scripts/can-i-deploy.sh
+      - name: publish
+        run: |
+          npm run test:contract
+          docker compose up -d --wait
+          curl -fsS -X PUT \
+            -H 'Content-Type: application/json' \
+            --data-binary @pacts/marketplace-web-marketplace-api.json \
+            "$PACT_BROKER_URL/pacts/provider/marketplace-api/consumer/marketplace-web/version/1.0.0" \
+            -o /dev/null
+        env:
+          PACT_BROKER_URL: http://127.0.0.1:21620
+      - name: verify
+        run: npm run verify:provider
         env:
           PACT_BROKER_URL: http://127.0.0.1:21620
           PACT_BROKER_TOKEN: ${{ secrets.PACT_BROKER_TOKEN }}
-          GIT_COMMIT: ${{ github.sha }}
+      - name: can-i-deploy
+        run: |
+          curl -fsS -X PUT \
+            -H 'Content-Type: application/json' \
+            "$PACT_BROKER_URL/pacticipants/marketplace-api/versions/1.0.0/tags/prod" \
+            -o /dev/null
+          bash scripts/can-i-deploy.sh
+        env:
+          PACT_BROKER_URL: http://127.0.0.1:21620
+          PACT_BROKER_TOKEN: ${{ secrets.PACT_BROKER_TOKEN }}
