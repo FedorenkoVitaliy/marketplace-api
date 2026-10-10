@@ -66,6 +66,8 @@ Zod-схема `src/config/env.schema.ts` — єдине місце, яке чи
 | `DB_URL` | `.env` | старт, host/user/db з URL; пароль з URL **не** йде в `pg.Pool` (інакше затре функцію з файла) |
 | `LOG_LEVEL` | `.env`, дефолт `info` | старт |
 | пароль `app_user` | файл `secrets/db_password` (gitignored) | кожне **нове** зʼєднання пулу |
+| `PACT_BROKER_URL` | сховище, локально дефолт `http://127.0.0.1:21620` | скрипт `can-i-deploy`, не новий env-файл |
+| `PACT_BROKER_TOKEN` | сховище (у локального брокера порожньо) | заголовок брокера, у git його немає |
 
 `.env` і `secrets/` не в git і не в Docker-образі. Перевірка ключів прикладу: `npm run check:env` (має надрукувати `sync`).
 
@@ -179,6 +181,7 @@ curl -sS -D - -X POST http://localhost:3000/orders \
 - **ДЗ#13.** TypeORM entities + міграція `InitSchema` (`synchronize: false`). Ідемпотентний `seed`, демо N+1, звіт QueryBuilder. Грейдер ставить схему через `npm run migrate`, не `psql -f db/schema.sql`. Ціна в entity — integer копійки.
 - **ДЗ#14.** `products.stock`, `users.balance`, checkout у `REPEATABLE READ` (атомарні `UPDATE … RETURNING` на stock і баланс + order + `jobs`), `withRetry` на `40001`/`40P01`, черга `jobs` через `FOR UPDATE SKIP LOCKED`. Підключення як у #13: `with-secrets.sh`, нових env немає.
 - **ДЗ#15.** PgBouncer (`pool_mode = transaction`, порт хоста `6432`) перед Postgres. `scripts/backup.sh` знімає `pg_dump -Fc` у `backups/`, `backup.cron` запускає його о 03:00. `scripts/restore-drill.sh` піднімає чистий контейнер `restore`, звіряє `orders` і друкує `MATCH`. Нових env-файлів немає: у `.env.example` змінився лише порт.
+- **ДЗ#16.** Jest-сюїти `test:integration`, `test:e2e`, `test:contract` і `verify:provider`. Postgres для тестів піднімає testcontainers; між тестами `TRUNCATE`. Pact публікується в брокер з compose, `can-i-deploy` у CI дивиться на тег `prod` версії провайдера. `PACT_BROKER_TOKEN` лише зі сховища.
 
 ## Data layer ops
 
@@ -263,3 +266,55 @@ bash scripts/with-secrets.sh dev bash scripts/restore-drill.sh
 ```
 
 `backup.sh` друкує шлях `backups/marketplace-YYYY-MM-DD-HHMMSS.dump`. Другий запуск того ж дня пише новий файл, не затирає попередній. `pg_restore --list` по цьому файлу показує TOC. `restore-drill.sh` друкує `MATCH` і код 0; повторний запуск теж. Числа RTO/RPO — у `RESTORE-DRILL.md`.
+
+## Тестування
+
+```bash
+npm run test:integration
+npm run test:e2e
+npm run test:contract
+npm run verify:provider
+```
+
+`test:integration` піднімає `postgres:16-alpine` з тесту і проганяє міграції. Кожен файл має свій контейнер, а перед кожним тестом таблиці чистить `TRUNCATE … RESTART IDENTITY CASCADE`. Відкат однієї транзакції тут не підходить: репозиторій бере пул, і наступний запит може піти іншим з'єднанням. Окремий контейнер на кожен тест лише помножив би старт Postgres. Другий `npm run test:integration` одразу після першого зелений сам, бо контейнери нові і тести їх гасять.
+
+`pacts/` у `.gitignore`. Контракт з'являється з `npm run test:contract`; у CI той самий крок пише файл перед публікацією.
+
+Брокер піднімається разом із рештою compose, без профілю:
+
+```bash
+docker compose up -d --wait
+```
+
+Він слухає `http://127.0.0.1:21620`. Healthcheck усередині контейнера б'є в `127.0.0.1`, не в `localhost`.
+
+Локально адреса і токен приїжджають зі сховища:
+
+```bash
+bash scripts/with-secrets.sh dev npm run verify:provider
+```
+
+`SKIP_VAULT=1` нічого не читає і просто виконує команду далі. Грейдер сховища не має, тому передає адресу змінною. Це та сама команда:
+
+```bash
+export PACT_BROKER_URL=http://127.0.0.1:21620
+npm run verify:provider
+```
+
+Код читає лише `process.env.PACT_BROKER_URL` і `process.env.PACT_BROKER_TOKEN`. `DATABASE_URL` тестам видає контейнер, не сховище.
+
+Гейт на свіжому брокері. Контракт опубліковано (`201`), провайдер `1.0.0` перевірено. Поки версію провайдера не позначено `prod`, відповідь така:
+
+```json
+{"summary":{"deployable":null,"reason":"There is no verified pact between version 1.0.0 of marketplace-web and the latest version of marketplace-api with tag prod (no such version exists)","success":0,"failed":0,"unknown":1}}
+```
+
+Після `PUT /pacticipants/marketplace-api/versions/1.0.0/tags/prod` (`201`) та сама адреса `can-i-deploy?pacticipant=marketplace-web&version=1.0.0&to=prod` відповідає:
+
+```json
+{"summary":{"deployable":true,"reason":"All required verification results are published and successful","success":1,"failed":0,"unknown":0}}
+```
+
+### ДЗ#16
+
+Грейдер клонує гілку `hw-16`. Сховища немає: токен брокера порожній, локальний брокер на `21620`. Команди і обидва стани гейта — у розділі «Тестування».
