@@ -7,9 +7,9 @@ test('одноразовий Postgres зберігає той самий ряд�
   try {
     const inserted = await pg.pool.query(
       `INSERT INTO orders (total_cents) VALUES ($1) RETURNING id::text, total_cents`,
-      [0],
+      [10],
     );
-    assert.deepEqual(inserted.rows, [{ id: '1', total_cents: 0 }]);
+    assert.deepEqual(inserted.rows, [{ id: '1', total_cents: 10 }]);
 
     const count = await pg.pool.query(`SELECT count(*)::int AS n FROM orders`);
     assert.equal(count.rows[0].n, 1);
