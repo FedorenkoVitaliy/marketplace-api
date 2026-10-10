@@ -1,6 +1,7 @@
 services: 
   db:
     image: postgres:16-alpine
+    command: -c max_connections=20
     ports: 
       - "5432:5432"
     environment: 
@@ -11,3 +12,39 @@ services:
       test: ["CMD-SHELL", "pg_isready -U admin -d marketplace"]
     volumes:
       - ./init.sql:/docker-entrypoint-initdb.d/init.sql:ro 
+  pgbouncer:
+    image: edoburu/pgbouncer:v1.24.1-p1
+    ports:
+      - "6432:5432"
+    volumes:
+      - ./pgbouncer/pgbouncer.ini:/etc/pgbouncer/pgbouncer.ini:ro
+      - ./pgbouncer/userlist.txt:/etc/pgbouncer/userlist.txt:ro
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "PGPASSWORD=admin-bootstrap-only psql -h 127.0.0.1 -p 5432 -U admin -d marketplace -c 'SELECT 1' >/dev/null"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  restore:
+    image: postgres:16-alpine
+    profiles: ["drill"]
+    ports:
+      - "5433:5432"
+    environment:
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: admin-bootstrap-only
+      POSTGRES_DB: marketplace
+    volumes:
+      - pgdata-restore:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U admin -d marketplace"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+volumes:
+  pgdata-restore:
+    name: marketplace-pgdata-restore

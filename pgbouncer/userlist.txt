@@ -1,0 +1,2 @@
+"admin" "admin-bootstrap-only"
+"app_user" "app-v1-password"

@@ -178,6 +178,13 @@ curl -sS -D - -X POST http://localhost:3000/orders \
 - **ДЗ#12.** Сирий SQL у `db/`: схема, seed ≥100k на `orders` і `products`, q1–q4, індекси, `OPTIMIZATIONS.md`. `DB_URL` той самий, що в ДЗ#11.
 - **ДЗ#13.** TypeORM entities + міграція `InitSchema` (`synchronize: false`). Ідемпотентний `seed`, демо N+1, звіт QueryBuilder. Грейдер ставить схему через `npm run migrate`, не `psql -f db/schema.sql`. Ціна в entity — integer копійки.
 - **ДЗ#14.** `products.stock`, `users.balance`, checkout у `REPEATABLE READ` (атомарні `UPDATE … RETURNING` на stock і баланс + order + `jobs`), `withRetry` на `40001`/`40P01`, черга `jobs` через `FOR UPDATE SKIP LOCKED`. Підключення як у #13: `with-secrets.sh`, нових env немає.
+- **ДЗ#15.** PgBouncer (`pool_mode = transaction`, порт хоста `6432`) перед Postgres. `scripts/backup.sh` знімає `pg_dump -Fc` у `backups/`, `backup.cron` запускає його о 03:00. `scripts/restore-drill.sh` піднімає чистий контейнер `restore`, звіряє `orders` і друкує `MATCH`. Нових env-файлів немає: у `.env.example` змінився лише порт.
+
+## Data layer ops
+
+Підняти стек: `docker compose up -d --wait`. Застосунок ходить у `127.0.0.1:6432` (PgBouncer), не в `5432`. Бекап: `export DATABASE_URL=…` і `bash scripts/with-secrets.sh dev bash scripts/backup.sh` — шлях до файлу з датою в імені. Відновлення: той самий `DATABASE_URL` і `bash scripts/restore-drill.sh`. Скрипт сам створює порожній контейнер, відновлює останній дамп і сам його прибирає.
+
+Transaction mode: PgBouncer видає справжнє зʼєднання з Postgres лише на час однієї транзакції, тому сотня клієнтів ділить кілька процесів бази. Між транзакціями зʼєднання інше, тож не переживають три речі: `SET` (стан сесії), `LISTEN`/`NOTIFY` і session advisory lock. `BEGIN`…`COMMIT` checkout тримає одне зʼєднання до кінця, тому списання stock і балансу лишаються разом.
 
 ## Конкурентність
 
@@ -241,3 +248,18 @@ SKIP LOCKED 322 мс · w1=3 w2=3 w3=3 w4=3 · оброблено двічі: 0
 Мілісекунди плавають; знак ефекту стабільний: SKIP LOCKED швидший, дублів немає, розподіл рівний.
 
 У DataSource `synchronize: false`. Схему ставить лише `migration:run`.
+
+### ДЗ#15
+
+Грейдер клонує гілку `hw-15`. Сховища немає: `SKIP_VAULT=1` і дев-креденшели з compose. `DATABASE_URL` дивиться на PgBouncer (`6432`), не на прямий Postgres.
+
+```bash
+docker compose up -d --wait
+export DATABASE_URL=postgres://admin:admin-bootstrap-only@127.0.0.1:6432/marketplace
+export DB_HOST=127.0.0.1 DB_PORT=6432 DB_USER=admin DB_PASSWORD=admin-bootstrap-only DB_NAME=marketplace
+export SKIP_VAULT=1
+bash scripts/with-secrets.sh dev bash scripts/backup.sh
+bash scripts/with-secrets.sh dev bash scripts/restore-drill.sh
+```
+
+`backup.sh` друкує шлях `backups/marketplace-YYYY-MM-DD-HHMMSS.dump`. Другий запуск того ж дня пише новий файл, не затирає попередній. `pg_restore --list` по цьому файлу показує TOC. `restore-drill.sh` друкує `MATCH` і код 0; повторний запуск теж. Числа RTO/RPO — у `RESTORE-DRILL.md`.

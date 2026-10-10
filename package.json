@@ -18,6 +18,8 @@
     "demo:retry": "bash scripts/with-secrets.sh dev node dist/src/demo-retry.js",
     "demo:race": "bash scripts/with-secrets.sh dev node dist/src/demo-race.js",
     "demo:workers": "bash scripts/with-secrets.sh dev node dist/src/demo-workers.js",
+    "demo:storm": "bash scripts/with-secrets.sh dev node dist/src/demo-storm.js",
+    "watch:pools": "bash scripts/watch-pools.sh",
     "demo:nplus1": "bash scripts/with-secrets.sh dev node dist/src/demo-nplus1.js",
     "report": "bash scripts/with-secrets.sh dev node dist/src/report.js"
 
