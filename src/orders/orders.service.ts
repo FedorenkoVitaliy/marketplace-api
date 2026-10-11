@@ -1,12 +1,18 @@
 import { BadRequestException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import type { Pool } from 'pg';
 import { getCurrentCursor, getNextCursor } from '../cursor.js';
+import { OrderEventsService } from './order-events.service.js';
 
 type OrderRow = { id: number; total_cents: number };
 
+const STATUSES = new Set(['pending', 'completed', 'cancelled']);
+
 @Injectable()
 export class OrdersService {
-  constructor(@Inject('PG_POOL') private readonly pool: Pool) {}
+  constructor(
+    @Inject('PG_POOL') private readonly pool: Pool,
+    private readonly events: OrderEventsService,
+  ) {}
 
   async list(limit?: string, cursor?: string) {
     const orders = await this.loadAll();
@@ -90,6 +96,27 @@ export class OrdersService {
     } finally {
       client.release();
     }
+  }
+
+  async updateStatus(id: number, status: string) {
+    if (!STATUSES.has(status)) {
+      throw new BadRequestException('invalid status');
+    }
+
+     const { rows } = await this.pool.query<{ id: string; status: string }>(
+      `UPDATE orders SET status = $2
+        WHERE id = $1
+        RETURNING id::text, status`,
+      [id, status],
+    );
+    const row = rows[0];
+    if (!row) {
+      throw new NotFoundException('Order not found');
+    }
+
+    this.events.publish(row.id, row.status);
+
+    return { id: Number(row.id), status: row.status };
   }
 
   private async loadAll() {

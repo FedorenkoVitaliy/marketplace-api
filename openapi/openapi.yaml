@@ -157,6 +157,54 @@ paths:
             application/problem+json:
               schema:
                 $ref: '#/components/schemas/Problem'
+  /orders/{id}/status:
+    patch:
+      operationId: updateOrderStatus
+      summary: Change order status
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required:
+                - status
+              properties:
+                status:
+                  type: string
+                  enum: [pending, completed, cancelled]
+      responses:
+        '200':
+          description: Status updated
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id, status]
+                properties:
+                  id:
+                    type: integer
+                  status:
+                    type: string
+        '400':
+          description: Invalid status
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '404':
+          description: Order not found
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
 
 components:
   schemas:
