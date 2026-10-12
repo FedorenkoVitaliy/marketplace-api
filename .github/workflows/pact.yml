@@ -32,12 +32,16 @@ jobs:
           PORT: '3217'
           DB_URL: postgres://test:test@127.0.0.1:5432/test
       - name: can-i-deploy
+        run: bash scripts/can-i-deploy.sh
+        env:
+          PACT_BROKER_URL: http://127.0.0.1:21620
+          PACT_BROKER_TOKEN: ${{ secrets.PACT_BROKER_TOKEN }}
+      - name: tag-prod
         run: |
           curl -fsS -X PUT \
             -H 'Content-Type: application/json' \
             "$PACT_BROKER_URL/pacticipants/marketplace-api/versions/1.0.0/tags/prod" \
             -o /dev/null
-          bash scripts/can-i-deploy.sh
         env:
           PACT_BROKER_URL: http://127.0.0.1:21620
           PACT_BROKER_TOKEN: ${{ secrets.PACT_BROKER_TOKEN }}

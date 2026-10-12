@@ -1,13 +1,16 @@
 #!/usr/bin/env bash
 set -euo pipefail
 URL="${PACT_BROKER_URL:-http://127.0.0.1:21620}"
+# Гейт репозиторію провайдера: чи можна випускати цю версію API в prod.
+# (Консюмерський web→prod з тегом — окремий ручний демо в README, не цей скрипт.)
+PACTICIPANT="${PACTICIPANT:-marketplace-api}"
 auth=()
 if [ -n "${PACT_BROKER_TOKEN:-}" ]; then
   auth+=(-H "Authorization: Bearer ${PACT_BROKER_TOKEN}")
 fi
 body="$(mktemp)"
 curl -fsS ${auth[@]+"${auth[@]}"} \
-  "$URL/can-i-deploy?pacticipant=marketplace-web&version=1.0.0&to=prod" \
+  "$URL/can-i-deploy?pacticipant=${PACTICIPANT}&version=1.0.0&to=prod" \
   -o "$body"
 cat "$body"
 node --input-type=module -e '

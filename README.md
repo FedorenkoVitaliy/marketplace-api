@@ -303,13 +303,19 @@ npm run verify:provider
 
 Код читає лише `process.env.PACT_BROKER_URL` і `process.env.PACT_BROKER_TOKEN`. `DATABASE_URL` тестам видає контейнер, не сховище.
 
-Гейт на свіжому брокері. Контракт опубліковано (`201`), провайдер `1.0.0` перевірено. Поки версію провайдера не позначено `prod`, відповідь така:
+CI після `verify` питає `scripts/can-i-deploy.sh` про **провайдера** (`marketplace-api` → `prod`) і лише потім ставить тег `prod`. Тег перед гейтом у тій самій джобі = дозвіл самому собі.
+
+Окремо — гейт **консюмера** (ручний демо). Контракт опубліковано (`201`), провайдер `1.0.0` перевірено. Поки версію провайдера не позначено `prod`:
+
+```bash
+curl -s "$PACT_BROKER_URL/can-i-deploy?pacticipant=marketplace-web&version=1.0.0&to=prod"
+```
 
 ```json
 {"summary":{"deployable":null,"reason":"There is no verified pact between version 1.0.0 of marketplace-web and the latest version of marketplace-api with tag prod (no such version exists)","success":0,"failed":0,"unknown":1}}
 ```
 
-Після `PUT /pacticipants/marketplace-api/versions/1.0.0/tags/prod` (`201`) та сама адреса `can-i-deploy?pacticipant=marketplace-web&version=1.0.0&to=prod` відповідає:
+Після `PUT /pacticipants/marketplace-api/versions/1.0.0/tags/prod` (`201`) той самий запит:
 
 ```json
 {"summary":{"deployable":true,"reason":"All required verification results are published and successful","success":1,"failed":0,"unknown":0}}
