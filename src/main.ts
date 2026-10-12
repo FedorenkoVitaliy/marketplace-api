@@ -13,7 +13,10 @@ export function mountHttp(app: Express): void {
         apiSpec: 'openapi/openapi.yaml',
         validateRequests: true,
         validateResponses: true,
-        ignorePaths: (path: string) => path === '/health' || path === '/db',
+        ignorePaths: (path: string) =>
+            path === '/health' ||
+            path === '/db' ||
+            /^\/orders\/[^/]+\/events$/.test(path),
     }));
 }
 

@@ -205,6 +205,28 @@ paths:
             application/problem+json:
               schema:
                 $ref: '#/components/schemas/Problem'
+  /orders/{id}/events:
+    get:
+      operationId: orderStatusEvents
+      summary: SSE stream of order status changes
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: Last-Event-ID
+          in: header
+          required: false
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: text/event-stream of order.status events
+          content:
+            text/event-stream:
+              schema:
+                type: string
 
 components:
   schemas:
@@ -244,6 +266,9 @@ components:
           type: integer
         total_cents:
           type: integer
+        user_id:
+          type: integer
+          description: Owner user id (for realtime join auth)
     CreateOrder:
       type: object
       additionalProperties: false

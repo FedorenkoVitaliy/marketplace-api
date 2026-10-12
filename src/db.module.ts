@@ -11,7 +11,7 @@ import { createPool } from './db.js';
       provide: 'PG_POOL',
       inject: [ConfigService],
       useFactory: (config: ConfigService<Env, true>) =>
-        createPool(process.env.DATABASE_URL ?? config.get('DB_URL', { infer: true })),
+        createPool(process.env.DATABASE_URL || config.get('DB_URL', { infer: true })),
     },
   ],
   exports: ['PG_POOL'],
