@@ -42,7 +42,7 @@ User stories:
 
 **Deploy.** Локально: Compose для Postgres, `npm start` = `tsc && node dist/src/main.js`. Образ збирається Dockerfile без `.env` і `secrets/` (див. `.dockerignore`). Хмара / K8s — пізніші лекції.
 
-## 4. Trade-offs
+## 4. Архітектурні компроміси
 
 Не став Infisical стіною секретів: у LMS цього ДЗ це бонус без балів, а обовʼязковий прийом — файл + `password: async () => readFile()`. Сховище можна додати, не викидаючи файл: env як і раніше замерзне на старті, пароль БД — ні.
 
@@ -324,3 +324,54 @@ curl -s "$PACT_BROKER_URL/can-i-deploy?pacticipant=marketplace-web&version=1.0.0
 ### ДЗ#16
 
 Грейдер клонує гілку `hw-16`. Сховища немає: токен брокера порожній, локальний брокер на `21620`. Команди і обидва стани гейта — у розділі «Тестування».
+
+## Realtime (ДЗ#18)
+
+Підняти стек і дані (потрібні buyer/product для `POST /orders`):
+
+```bash
+docker compose up -d --wait
+bash scripts/with-secrets.sh dev npm run migrate
+bash scripts/with-secrets.sh dev npm run seed
+npm start
+```
+
+SSE (інший термінал):
+
+```bash
+curl -sN --max-time 2 -D - -o /dev/null http://localhost:3000/orders/1/events | grep -i '^content-type'
+# змінити статус і дивитись потік:
+curl -sN --max-time 5 http://localhost:3000/orders/1/events
+curl -s -X PATCH http://localhost:3000/orders/1/status \
+  -H 'Content-Type: application/json' \
+  -d '{"status":"completed"}'
+```
+
+Ізоляція кімнат (застосунок уже слухає `:3000`):
+
+```bash
+node scripts/realtime-demo.mjs
+# A_RECEIVED=1
+# B_RECEIVED=0
+
+node scripts/realtime-demo.mjs --same-room
+# A_RECEIVED=1
+# B_RECEIVED=1
+```
+
+При двох інстансах застосунку in-memory кімнати Socket.IO і буфер SSE не спільні — клієнт на інстансі B не почує emit з інстансу A; лікується Redis-адаптером Socket.IO (і спільним store для SSE-буфера), як у кроці 7 лекції 18.
+
+## Trade-offs: WebSocket vs SSE
+
+Для нотифікацій «статус замовлення змінився» у проді я лишив би **SSE**: канал односторонній (сервер→клієнт), `Last-Event-ID` і реконект уже в `EventSource`, менше рухомих частин за проксі/балансувальниками, ніж у Socket.IO. WebSocket лишив би там, де потрібен двосторонній чат або ack з клієнта.
+
+| Критерій | WebSocket (Socket.IO) | SSE |
+|---|---|---|
+| Напрям каналу | full-duplex (клієнт↔сервер) | server→client (клієнт лише HTTP) |
+| Реконект / відновлення | свій протокол + ack; буфер кімнат in-memory | `Last-Event-ID` + `retry` з коробки EventSource |
+| Вимоги до інфраструктури | sticky sessions або Redis-адаптер при >1 інстансі | звичайний HTTP; буфер подій теж треба шарити при >1 інстансі |
+| Ціна на подію | кадри Engine.IO / WS + кімнати | один long-lived HTTP-відповідь, менше обгортки |
+
+### ДЗ#18
+
+Грейдер клонує гілку `hw-18`. Застосунок піднятий за розділом «Realtime (ДЗ#18)».
