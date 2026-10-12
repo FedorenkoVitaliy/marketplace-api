@@ -4,7 +4,6 @@ import { Test } from '@nestjs/testing';
 import { ExpressAdapter } from '@nestjs/platform-express';
 import express from 'express';
 import request from 'supertest';
-import { AppModule } from '../../src/app.module.js';
 import { mountHttp } from '../../src/main.js';
 import { startPg } from '../integration/pg.js';
 import { seedCatalog } from '../integration/seed-catalog.js';
@@ -24,6 +23,8 @@ describe('POST /orders', () => {
 
     http = express();
     mountHttp(http);
+    // ConfigModule.forRoot({ validate }) — на імпорті AppModule; env уже виставлено вище.
+    const { AppModule } = await import('../../src/app.module.js');
     const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
     const app = moduleRef.createNestApplication(new ExpressAdapter(http), { bodyParser: false });
     await app.init();

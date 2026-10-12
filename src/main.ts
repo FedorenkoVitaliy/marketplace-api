@@ -5,7 +5,6 @@ import { middleware } from 'express-openapi-validator';
 import { NestFactory } from '@nestjs/core';
 import { ConfigService } from '@nestjs/config';
 import { ExpressAdapter } from '@nestjs/platform-express';
-import { AppModule } from './app.module.js';
 import { type Env } from './config/env.schema.js';
 
 export function mountHttp(app: Express): void {
@@ -28,6 +27,10 @@ export async function createHttpApp(): Promise<{
     const app = express();
     mountHttp(app);
 
+    // AppModule → ConfigModule.forRoot({ validate }) біжить синхронно на імпорті.
+    // Статичний import тут зривав би test:e2e / verify:provider на свіжому клоні
+    // (env з beforeAll ще немає). Динамічний import — після process.env.*.
+    const { AppModule } = await import('./app.module.js');
     const nestApp = await NestFactory.create(
         AppModule,
         new ExpressAdapter(app),
