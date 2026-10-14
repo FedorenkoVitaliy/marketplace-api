@@ -215,6 +215,18 @@ paths:
           required: true
           schema:
             type: integer
+        - name: x-user-id
+          in: header
+          required: false
+          schema:
+            type: string
+          description: owner user id (same check as Socket.IO join); or pass userId query
+        - name: userId
+          in: query
+          required: false
+          schema:
+            type: string
+          description: alternative to x-user-id
         - name: Last-Event-ID
           in: header
           required: false
@@ -227,6 +239,18 @@ paths:
             text/event-stream:
               schema:
                 type: string
+        '401':
+          description: missing user id (anonymous)
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '403':
+          description: caller does not own the order
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
 
 components:
   schemas:

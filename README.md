@@ -181,7 +181,7 @@ curl -sS -D - -X POST http://localhost:3000/orders \
 - **ДЗ#13.** TypeORM entities + міграція `InitSchema` (`synchronize: false`). Ідемпотентний `seed`, демо N+1, звіт QueryBuilder. Грейдер ставить схему через `npm run migrate`, не `psql -f db/schema.sql`. Ціна в entity — integer копійки.
 - **ДЗ#14.** `products.stock`, `users.balance`, checkout у `REPEATABLE READ` (атомарні `UPDATE … RETURNING` на stock і баланс + order + `jobs`), `withRetry` на `40001`/`40P01`, черга `jobs` через `FOR UPDATE SKIP LOCKED`. Підключення як у #13: `with-secrets.sh`, нових env немає.
 - **ДЗ#15.** PgBouncer (`pool_mode = transaction`, порт хоста `6432`) перед Postgres. `scripts/backup.sh` знімає `pg_dump -Fc` у `backups/`, `backup.cron` запускає його о 03:00. `scripts/restore-drill.sh` піднімає чистий контейнер `restore`, звіряє `orders` і друкує `MATCH`. Нових env-файлів немає: у `.env.example` змінився лише порт.
-- **ДЗ#16.** Jest-сюїти `test:integration`, `test:e2e`, `test:contract` і `verify:provider`. Postgres для тестів піднімає testcontainers; між тестами `TRUNCATE`. Pact публікується в брокер з compose, `can-i-deploy` у CI дивиться на тег `prod` версії провайдера. `PACT_BROKER_TOKEN` лише зі сховища.
+- **ДЗ#16.** Jest-сюїти `test:integration`, `test:e2e`, `test:contract` і `verify:provider`. Postgres для тестів піднімає testcontainers; між тестами `TRUNCATE`. Pact публікується в брокер з compose; `providerVersion` = `GITHUB_SHA`; у CI після verify тег `prod` на цю версію, потім `can-i-deploy` для консюмера `marketplace-web`. `PACT_BROKER_TOKEN` лише зі сховища.
 
 ## Data layer ops
 
@@ -303,9 +303,11 @@ npm run verify:provider
 
 Код читає лише `process.env.PACT_BROKER_URL` і `process.env.PACT_BROKER_TOKEN`. `DATABASE_URL` тестам видає контейнер, не сховище.
 
-CI після `verify` питає `scripts/can-i-deploy.sh` про **провайдера** (`marketplace-api` → `prod`) і лише потім ставить тег `prod`. Тег перед гейтом у тій самій джобі = дозвіл самому собі.
+`can-i-deploy` питає **консюмера** (`marketplace-web` → `prod`): чи є перевірений контракт із версією `marketplace-api`, позначеною `prod`. Питання про провайдера без prod-консюмера дає «no missing dependencies» і exit 0 навіть до тега — це не гейт.
 
-Окремо — гейт **консюмера** (ручний демо). Контракт опубліковано (`201`), провайдер `1.0.0` перевірено. Поки версію провайдера не позначено `prod`:
+Брокер з compose новий у кожному CI-прогоні, тож тег з минулої джоби не доживає. У workflow після `verify` ставимо `prod` на **цю** версію провайдера (`GITHUB_SHA`, той самий `providerVersion` у Verifier) і лише тоді ганяємо `scripts/can-i-deploy.sh`.
+
+Локально (ручний демо обох станів). Контракт опубліковано (`201`), провайдер перевірено (`providerVersion` = коміт або `1.0.0` без `GITHUB_SHA`). Поки версію провайдера не позначено `prod`:
 
 ```bash
 curl -s "$PACT_BROKER_URL/can-i-deploy?pacticipant=marketplace-web&version=1.0.0&to=prod"
@@ -315,7 +317,7 @@ curl -s "$PACT_BROKER_URL/can-i-deploy?pacticipant=marketplace-web&version=1.0.0
 {"summary":{"deployable":null,"reason":"There is no verified pact between version 1.0.0 of marketplace-web and the latest version of marketplace-api with tag prod (no such version exists)","success":0,"failed":0,"unknown":1}}
 ```
 
-Після `PUT /pacticipants/marketplace-api/versions/1.0.0/tags/prod` (`201`) той самий запит:
+Після `PUT /pacticipants/marketplace-api/versions/<providerVersion>/tags/prod` (`201`) той самий запит:
 
 ```json
 {"summary":{"deployable":true,"reason":"All required verification results are published and successful","success":1,"failed":0,"unknown":0}}
@@ -327,22 +329,34 @@ curl -s "$PACT_BROKER_URL/can-i-deploy?pacticipant=marketplace-web&version=1.0.0
 
 ## Realtime (ДЗ#18)
 
-Підняти стек і дані (потрібні buyer/product для `POST /orders`):
+Підняти стек і дані (потрібні buyer/product для `POST /orders`). Сховища немає — як у ДЗ#15: `SKIP_VAULT=1` і дев-креденшели з compose. `DATABASE_URL` / `DB_*` дивляться на PgBouncer (`6432`).
 
 ```bash
 docker compose up -d --wait
+export DATABASE_URL=postgres://admin:admin-bootstrap-only@127.0.0.1:6432/marketplace
+export DB_HOST=127.0.0.1 DB_PORT=6432 DB_USER=admin DB_PASSWORD=admin-bootstrap-only DB_NAME=marketplace
+export SKIP_VAULT=1
 bash scripts/with-secrets.sh dev npm run migrate
 bash scripts/with-secrets.sh dev npm run seed
 npm start
 ```
 
-SSE (інший термінал):
+Без `SKIP_VAULT=1` `with-secrets.sh` падає з `run infisical init`. Міграції йдуть від `admin`; рантайм може лишитись на `DATABASE_URL` вище або перейти на `app_user` + `secrets/db_password` (див. «Запуск») — у `init.sql` для `app_user` є GRANT на таблиці/послідовності.
+
+SSE (інший термінал). Потік вимагає власника замовлення (`x-user-id` або `?userId=`), як join у Socket.IO:
 
 ```bash
-curl -sN --max-time 2 -D - -o /dev/null http://localhost:3000/orders/1/events | grep -i '^content-type'
+ORDER=$(curl -s -X POST http://localhost:3000/orders \
+  -H 'Content-Type: application/json' -H 'Idempotency-Key: hw18-sse' \
+  -d '{"items":[1]}')
+OID=$(node -e "console.log(JSON.parse(process.argv[1]).id)" "$ORDER")
+UID=$(node -e "console.log(JSON.parse(process.argv[1]).user_id)" "$ORDER")
+
+curl -sN --max-time 2 -D - -o /dev/null -H "x-user-id: $UID" \
+  "http://localhost:3000/orders/$OID/events" | grep -i '^content-type'
 # змінити статус і дивитись потік:
-curl -sN --max-time 5 http://localhost:3000/orders/1/events
-curl -s -X PATCH http://localhost:3000/orders/1/status \
+curl -sN --max-time 5 -H "x-user-id: $UID" "http://localhost:3000/orders/$OID/events"
+curl -s -X PATCH "http://localhost:3000/orders/$OID/status" \
   -H 'Content-Type: application/json' \
   -d '{"status":"completed"}'
 ```
