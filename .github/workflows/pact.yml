@@ -31,17 +31,19 @@ jobs:
           PACT_BROKER_TOKEN: ${{ secrets.PACT_BROKER_TOKEN }}
           PORT: '3217'
           DB_URL: postgres://test:test@127.0.0.1:5432/test
-      - name: can-i-deploy
-        run: bash scripts/can-i-deploy.sh
-        env:
-          PACT_BROKER_URL: http://127.0.0.1:21620
-          PACT_BROKER_TOKEN: ${{ secrets.PACT_BROKER_TOKEN }}
       - name: tag-prod
+        # Брокер з compose новий у кожному прогоні — тег з минулого job не доживає.
+        # Тому prod ставимо в цій же джобі на GITHUB_SHA (той самий providerVersion).
         run: |
           curl -fsS -X PUT \
             -H 'Content-Type: application/json' \
-            "$PACT_BROKER_URL/pacticipants/marketplace-api/versions/1.0.0/tags/prod" \
+            "$PACT_BROKER_URL/pacticipants/marketplace-api/versions/${GITHUB_SHA}/tags/prod" \
             -o /dev/null
+        env:
+          PACT_BROKER_URL: http://127.0.0.1:21620
+          PACT_BROKER_TOKEN: ${{ secrets.PACT_BROKER_TOKEN }}
+      - name: can-i-deploy
+        run: bash scripts/can-i-deploy.sh
         env:
           PACT_BROKER_URL: http://127.0.0.1:21620
           PACT_BROKER_TOKEN: ${{ secrets.PACT_BROKER_TOKEN }}

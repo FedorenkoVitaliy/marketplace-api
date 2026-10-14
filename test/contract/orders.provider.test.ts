@@ -10,7 +10,7 @@ import { seedCatalog } from '../integration/seed-catalog.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 const pactFile = path.join(root, 'pacts', 'marketplace-web-marketplace-api.json');
-const providerVersion = '1.0.0';
+const providerVersion = process.env.GITHUB_SHA ?? '1.0.0';
 
 describe('verify marketplace-api', () => {
   let pg: Awaited<ReturnType<typeof startPg>>;
