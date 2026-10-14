@@ -329,22 +329,34 @@ curl -s "$PACT_BROKER_URL/can-i-deploy?pacticipant=marketplace-web&version=1.0.0
 
 ## Realtime (ДЗ#18)
 
-Підняти стек і дані (потрібні buyer/product для `POST /orders`):
+Підняти стек і дані (потрібні buyer/product для `POST /orders`). Сховища немає — як у ДЗ#15: `SKIP_VAULT=1` і дев-креденшели з compose. `DATABASE_URL` / `DB_*` дивляться на PgBouncer (`6432`).
 
 ```bash
 docker compose up -d --wait
+export DATABASE_URL=postgres://admin:admin-bootstrap-only@127.0.0.1:6432/marketplace
+export DB_HOST=127.0.0.1 DB_PORT=6432 DB_USER=admin DB_PASSWORD=admin-bootstrap-only DB_NAME=marketplace
+export SKIP_VAULT=1
 bash scripts/with-secrets.sh dev npm run migrate
 bash scripts/with-secrets.sh dev npm run seed
 npm start
 ```
 
-SSE (інший термінал):
+Без `SKIP_VAULT=1` `with-secrets.sh` падає з `run infisical init`. Міграції йдуть від `admin`; рантайм може лишитись на `DATABASE_URL` вище або перейти на `app_user` + `secrets/db_password` (див. «Запуск») — у `init.sql` для `app_user` є GRANT на таблиці/послідовності.
+
+SSE (інший термінал). Потік вимагає власника замовлення (`x-user-id` або `?userId=`), як join у Socket.IO:
 
 ```bash
-curl -sN --max-time 2 -D - -o /dev/null http://localhost:3000/orders/1/events | grep -i '^content-type'
+ORDER=$(curl -s -X POST http://localhost:3000/orders \
+  -H 'Content-Type: application/json' -H 'Idempotency-Key: hw18-sse' \
+  -d '{"items":[1]}')
+OID=$(node -e "console.log(JSON.parse(process.argv[1]).id)" "$ORDER")
+UID=$(node -e "console.log(JSON.parse(process.argv[1]).user_id)" "$ORDER")
+
+curl -sN --max-time 2 -D - -o /dev/null -H "x-user-id: $UID" \
+  "http://localhost:3000/orders/$OID/events" | grep -i '^content-type'
 # змінити статус і дивитись потік:
-curl -sN --max-time 5 http://localhost:3000/orders/1/events
-curl -s -X PATCH http://localhost:3000/orders/1/status \
+curl -sN --max-time 5 -H "x-user-id: $UID" "http://localhost:3000/orders/$OID/events"
+curl -s -X PATCH "http://localhost:3000/orders/$OID/status" \
   -H 'Content-Type: application/json' \
   -d '{"status":"completed"}'
 ```

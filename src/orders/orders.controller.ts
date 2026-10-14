@@ -1,4 +1,17 @@
-import { Body, Controller, Get, HttpCode, Param, Patch, Post, Query, Req, Res } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  ForbiddenException,
+  Get,
+  HttpCode,
+  Param,
+  Patch,
+  Post,
+  Query,
+  Req,
+  Res,
+  UnauthorizedException,
+} from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { OrderEventsService } from './order-events.service.js';
 import { OrdersService } from './orders.service.js';
@@ -16,11 +29,22 @@ export class OrdersController {
   }
 
   @Get(':id/events')
-  streamEvents(
+  async streamEvents(
     @Param('id') id: string,
     @Req() req: Request,
     @Res() res: Response,
   ) {
+    const userId = String(
+      req.headers['x-user-id'] ?? req.query.userId ?? '',
+    );
+    if (!userId) {
+      throw new UnauthorizedException('anonymous');
+    }
+    const owned = await this.orders.isOwnedBy(Number(id), userId);
+    if (!owned) {
+      throw new ForbiddenException('forbidden');
+    }
+
     res.writeHead(200, {
       'Content-Type': 'text/event-stream',
       'Cache-Control': 'no-cache',
