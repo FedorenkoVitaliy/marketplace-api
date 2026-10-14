@@ -28,9 +28,9 @@
     "demo:nplus1": "bash scripts/with-secrets.sh dev node dist/src/demo-nplus1.js",
     "report": "bash scripts/with-secrets.sh dev node dist/src/report.js",
     "demo:realtime": "node scripts/realtime-demo.mjs",
-    "demo:publish": "tsc && bash scripts/with-secrets.sh dev node dist/src/demo-publish.js",
-    "demo:dlq": "tsc && bash scripts/with-secrets.sh dev node dist/src/demo-dlq.js",
-    "demo:duplicate": "tsc && bash scripts/with-secrets.sh dev node dist/src/demo-duplicate.js"
+    "demo:publish": "npm run build && bash scripts/with-secrets.sh dev node dist/src/demo-publish.js",
+    "demo:dlq": "npm run build && bash scripts/with-secrets.sh dev node dist/src/demo-dlq.js",
+    "demo:duplicate": "npm run build && bash scripts/with-secrets.sh dev node dist/src/demo-duplicate.js"
   },
   "engines": {
     "node": ">=22"
