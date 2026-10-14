@@ -1,16 +1,15 @@
 import { depth, sleep, waitFor, withChannel, withConfirmChannel, body } from './messaging/amqp.js';
 import { DLQ, EXCHANGE, PREFETCH, QUEUE, ROUTING_KEY } from './messaging/constants.js';
-import { effectCount, resetState } from './messaging/effects.js';
+import { closeEffectsPool, effectCount, resetState } from './messaging/effects.js';
 import { buildOrderPlaced } from './messaging/events.js';
 import { ConsumerProcess } from './messaging/consumer-process.js';
 import { resetTopology } from './messaging/topology.js';
 
-const EFFECTS = 'demo-publish-effects.jsonl';
-const PROCESSED = 'demo-publish-processed.txt';
+const CONSUMER = 'demo-publish';
 const N = 5;
 
 async function main(): Promise<void> {
-  resetState(EFFECTS, PROCESSED);
+  await resetState(CONSUMER);
 
   await withChannel(async (ch) => {
     await resetTopology(ch);
@@ -20,8 +19,7 @@ async function main(): Promise<void> {
   consumer.start({
     CHILD_MODE: 'manual',
     CHILD_DEDUP: '1',
-    CHILD_DEDUP_FILE: PROCESSED,
-    CHILD_EFFECTS: EFFECTS,
+    CHILD_CONSUMER: CONSUMER,
     CHILD_EFFECT_MS: '30',
     CHILD_PREFETCH: String(PREFETCH),
   });
@@ -35,12 +33,14 @@ async function main(): Promise<void> {
         userId: 1,
         totalCents: 100 * i,
       });
-      ch.publish(EXCHANGE, ROUTING_KEY, body(event), {
+      const ok = ch.publish(EXCHANGE, ROUTING_KEY, body(event), {
         persistent: true,
         contentType: 'application/json',
         messageId: event.eventId,
         type: event.type,
+        mandatory: true,
       });
+      if (!ok) throw new Error('publish buffer full');
       published += 1;
     }
     await ch.waitForConfirms();
@@ -48,13 +48,13 @@ async function main(): Promise<void> {
 
   await waitFor(
     'усі ефекти',
-    () => effectCount(EFFECTS) >= N,
+    async () => (await effectCount(CONSUMER)) >= N,
     20_000,
   );
   await sleep(200);
 
   const delivered = consumer.count('recv');
-  const effect = effectCount(EFFECTS);
+  const effect = await effectCount(CONSUMER);
   const acked = consumer.count('acked');
   let work = 0;
   let dlq = 0;
@@ -64,6 +64,7 @@ async function main(): Promise<void> {
   });
 
   await consumer.stop();
+  await closeEffectsPool();
 
   console.log(`published=${published}`);
   console.log(`delivered=${delivered}`);
@@ -81,7 +82,8 @@ async function main(): Promise<void> {
   process.exit(ok ? 0 : 1);
 }
 
-main().catch((e) => {
+main().catch(async (e) => {
   console.error(e);
+  await closeEffectsPool().catch(() => {});
   process.exit(1);
 });

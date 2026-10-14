@@ -1,7 +1,7 @@
 import type { Message } from 'amqplib';
-import { depth, parse, waitFor, withChannel, body } from './messaging/amqp.js';
+import { depth, parse, waitFor, withChannel, withConfirmChannel, body } from './messaging/amqp.js';
 import { DLQ, EXCHANGE, QUEUE, ROUTING_KEY } from './messaging/constants.js';
-import { resetState } from './messaging/effects.js';
+import { closeEffectsPool, resetState } from './messaging/effects.js';
 import { buildOrderPlaced } from './messaging/events.js';
 import { ConsumerProcess } from './messaging/consumer-process.js';
 import { resetTopology } from './messaging/topology.js';
@@ -19,7 +19,7 @@ function deathReason(msg: Message): string {
 }
 
 async function main(): Promise<void> {
-  resetState('demo-dlq-effects.jsonl', 'demo-dlq-processed.txt');
+  await resetState('demo-dlq');
 
   await withChannel(async (ch) => {
     await resetTopology(ch);
@@ -31,12 +31,15 @@ async function main(): Promise<void> {
     totalCents: 0,
   });
 
-  await withChannel(async (ch) => {
-    ch.publish(EXCHANGE, ROUTING_KEY, body(event), {
+  await withConfirmChannel(async (ch) => {
+    const ok = ch.publish(EXCHANGE, ROUTING_KEY, body(event), {
       persistent: true,
       messageId: event.eventId,
       type: event.type,
+      mandatory: true,
     });
+    if (!ok) throw new Error('publish buffer full');
+    await ch.waitForConfirms();
     await waitFor('у робочій', async () => (await ch.checkQueue(QUEUE)).messageCount === 1);
   });
 
@@ -64,6 +67,7 @@ async function main(): Promise<void> {
   });
 
   await consumer.stop();
+  await closeEffectsPool();
 
   const rejected = consumer.count('rejected');
   const effect = 0;
@@ -78,7 +82,8 @@ async function main(): Promise<void> {
   process.exit(ok ? 0 : 1);
 }
 
-main().catch((e) => {
+main().catch(async (e) => {
   console.error(e);
+  await closeEffectsPool().catch(() => {});
   process.exit(1);
 });

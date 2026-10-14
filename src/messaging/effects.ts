@@ -1,47 +1,92 @@
-import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import type { Pool } from 'pg';
+import { createPool } from '../db.js';
 
-const ROOT = join(dirname(fileURLToPath(import.meta.url)), '../../..');
-export const STATE_DIR = join(ROOT, '.state');
+let pool: Pool | undefined;
 
-export function statePath(name: string): string {
-  mkdirSync(STATE_DIR, { recursive: true });
-  return join(STATE_DIR, name);
+function dbUrl(): string {
+  const url = process.env.DATABASE_URL || process.env.DB_URL;
+  if (!url) {
+    throw new Error('DATABASE_URL або DB_URL не задано (дедуп ефектів у Postgres)');
+  }
+  return url;
 }
 
-export function resetState(...names: string[]): void {
-  for (const n of names) rmSync(statePath(n), { force: true });
+export function getEffectsPool(): Pool {
+  if (!pool) pool = createPool(dbUrl());
+  return pool;
 }
 
-/** Неідемпотентний запис ефекту: повтор додає другий рядок. */
-export function applyEffect(file: string, id: string, payload: unknown): void {
-  appendFileSync(
-    statePath(file),
-    `${JSON.stringify({ id, payload, at: Date.now() })}\n`,
+export async function closeEffectsPool(): Promise<void> {
+  if (!pool) return;
+  await pool.end();
+  pool = undefined;
+}
+
+/** Прибрати позначки й ефекти споживача(ів) перед демо. */
+export async function resetState(...consumers: string[]): Promise<void> {
+  const p = getEffectsPool();
+  for (const consumer of consumers) {
+    await p.query(`DELETE FROM message_effects WHERE consumer = $1`, [consumer]);
+    await p.query(`DELETE FROM processed_messages WHERE consumer = $1`, [consumer]);
+  }
+}
+
+export async function effectCount(consumer: string): Promise<number> {
+  const { rows } = await getEffectsPool().query<{ n: string }>(
+    `SELECT count(*)::text AS n FROM message_effects WHERE consumer = $1`,
+    [consumer],
   );
+  return Number(rows[0]?.n ?? 0);
 }
 
-export function readEffects(file: string): { id: string }[] {
-  const p = statePath(file);
-  if (!existsSync(p)) return [];
-  return readFileSync(p, 'utf8')
-    .split('\n')
-    .filter(Boolean)
-    .map((l) => JSON.parse(l) as { id: string });
+/**
+ * Позначка processed + ефект в одному COMMIT.
+ * Дубль (ON CONFLICT) → 'duplicate' без нового ефекту.
+ */
+export async function claimAndApply(
+  consumer: string,
+  id: string,
+  payload: unknown,
+): Promise<'applied' | 'duplicate'> {
+  const p = getEffectsPool();
+  const client = await p.connect();
+  try {
+    await client.query('BEGIN');
+    const claimed = await client.query(
+      `INSERT INTO processed_messages (consumer, event_id)
+       VALUES ($1, $2)
+       ON CONFLICT DO NOTHING
+       RETURNING event_id`,
+      [consumer, id],
+    );
+    if (claimed.rowCount === 0) {
+      await client.query('ROLLBACK');
+      return 'duplicate';
+    }
+    await client.query(
+      `INSERT INTO message_effects (consumer, event_id, payload)
+       VALUES ($1, $2, $3::jsonb)`,
+      [consumer, id, JSON.stringify(payload)],
+    );
+    await client.query('COMMIT');
+    return 'applied';
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
-export function effectCount(file: string): number {
-  return readEffects(file).length;
-}
-
-/** Сховище оброблених eventId на диску — переживає рестарт процесу. */
-export function seen(file: string, id: string): boolean {
-  const p = statePath(file);
-  if (!existsSync(p)) return false;
-  return readFileSync(p, 'utf8').split('\n').includes(id);
-}
-
-export function remember(file: string, id: string): void {
-  appendFileSync(statePath(file), `${id}\n`);
+/** Ефект без дедупа (рідкісний шлях без CHILD_DEDUP). */
+export async function applyEffect(
+  consumer: string,
+  id: string,
+  payload: unknown,
+): Promise<void> {
+  await getEffectsPool().query(
+    `INSERT INTO message_effects (consumer, event_id, payload)
+     VALUES ($1, $2, $3::jsonb)`,
+    [consumer, id, JSON.stringify(payload)],
+  );
 }

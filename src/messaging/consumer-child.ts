@@ -4,12 +4,12 @@
  *
  * Env:
  *   CHILD_MODE=manual|gap|reject
- *   CHILD_DEDUP=1 + CHILD_DEDUP_FILE
- *   CHILD_EFFECTS, CHILD_EFFECT_MS, CHILD_GAP_MS, CHILD_PREFETCH
+ *   CHILD_DEDUP=1 + CHILD_CONSUMER (namespace у Postgres)
+ *   CHILD_EFFECT_MS, CHILD_GAP_MS, CHILD_PREFETCH
  */
 import { connect } from './amqp.js';
 import { PREFETCH, QUEUE } from './constants.js';
-import { applyEffect, remember, seen } from './effects.js';
+import { applyEffect, claimAndApply, closeEffectsPool } from './effects.js';
 import { assertTopology } from './topology.js';
 import type { OrderPlacedEvent } from './events.js';
 
@@ -18,9 +18,11 @@ type Mode = 'manual' | 'gap' | 'reject';
 const MODE = (process.env.CHILD_MODE ?? 'manual') as Mode;
 const EFFECT_MS = Number(process.env.CHILD_EFFECT_MS ?? 40);
 const GAP_MS = Number(process.env.CHILD_GAP_MS ?? 400);
-const EFFECTS = process.env.CHILD_EFFECTS ?? 'effects.jsonl';
+const CONSUMER =
+  process.env.CHILD_CONSUMER ??
+  process.env.CHILD_EFFECTS ??
+  'effects';
 const DEDUP = process.env.CHILD_DEDUP === '1';
-const DEDUP_FILE = process.env.CHILD_DEDUP_FILE ?? 'processed.txt';
 const PREFETCH_N = Number(process.env.CHILD_PREFETCH ?? PREFETCH);
 
 const send = (m: unknown) => process.send?.(m);
@@ -50,15 +52,19 @@ async function main(): Promise<void> {
         continue;
       }
 
-      if (DEDUP && seen(DEDUP_FILE, id)) {
-        send({ t: 'skip', n, id });
-        ch.ack(msg);
-        continue;
+      await new Promise((r) => setTimeout(r, EFFECT_MS));
+
+      if (DEDUP) {
+        const result = await claimAndApply(CONSUMER, id, payload);
+        if (result === 'duplicate') {
+          send({ t: 'skip', n, id });
+          ch.ack(msg);
+          continue;
+        }
+      } else {
+        await applyEffect(CONSUMER, id, payload);
       }
 
-      await new Promise((r) => setTimeout(r, EFFECT_MS));
-      if (DEDUP) remember(DEDUP_FILE, id);
-      applyEffect(EFFECTS, id, payload);
       send({ t: 'effect', n, id });
 
       if (MODE === 'gap') await new Promise((r) => setTimeout(r, GAP_MS));
@@ -90,6 +96,7 @@ async function main(): Promise<void> {
     if (m?.t === 'stop') {
       await ch.close().catch(() => {});
       await conn.close().catch(() => {});
+      await closeEffectsPool().catch(() => {});
       process.exit(0);
     }
   });
