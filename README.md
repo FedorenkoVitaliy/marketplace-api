@@ -389,3 +389,43 @@ node scripts/realtime-demo.mjs --same-room
 ### ДЗ#18
 
 Грейдер клонує гілку `hw-18`. Застосунок піднятий за розділом «Realtime (ДЗ#18)».
+
+## Async-події через RabbitMQ
+
+Між оформленням замовлення і «хтось почув» стоїть брокер: повідомлення живе, поки споживач не візьме відповідальність. Exchange `shop.events` (topic), черга `shop.orders.placed` (quorum) з `x-dead-letter-exchange: shop.dlx`, binding `order.placed`. Топологію оголошує бутстрап/споживач, не HTTP-продюсер.
+
+Публікація `order.placed` після `COMMIT` створення замовлення — confirm-канал + `mandatory`. Контракт тіла: `eventId`, `type`, `occurredAt`, `data` (не ORM-сутність). `eventId = order.placed:<orderId>` — стабільний ключ дедупа.
+
+Споживач: `noAck: false`, ack **після** ефекту; `prefetch=10` (10 × ~50 мс ≪ 30 хв `consumer_timeout`). Позначка `eventId` і рядок ефекту — у Postgres (`processed_messages` + `message_effects`) **в одному COMMIT** (`claimAndApply`): спільні між репліками, без щілини «позначив → впав → ефекту немає». Публікація в демо — `mandatory: true`, як у `publisher.ts`.
+
+**Це at-least-once доставка, не exactly-once.** Брокер може віддати те саме повідомлення двічі (падіння після ефекту до ack). Exactly-once **результат** дає ідемпотентний ефект: повтор з тим самим `eventId` не додає другий рядок ефекту. Формулювання «RabbitMQ дає exactly-once» — хибне.
+
+`demo:duplicate` відтворює дубль через **SIGKILL** дочірнього споживача в щілині між ефектом і ack (окремий процес), далі другий споживач дочищає чергу.
+
+Числа з прогону 14.10.2026:
+
+| Демо | Вивід |
+|---|---|
+| `demo:publish` | `published=5 delivered=5 effect=5 acked=5 dlq=0 prefetch=10` |
+| `demo:dlq` | `rejected=1 work=0 dlq=1 dlq-reason=rejected effect=0` |
+| `demo:duplicate` | `deliveries=2 effect=1 skipped=1` |
+
+### ДЗ#19
+
+Грейдер клонує гілку `hw-19`. Сховища немає — `SKIP_VAULT=1` і креденшели з compose. Дедуп ефектів у Postgres (PgBouncer `6432`) — потрібні `DATABASE_URL` / `DB_*` і міграція.
+
+```bash
+docker compose up -d --wait
+export BROKER_URL=amqp://app:app@127.0.0.1:5672
+export DATABASE_URL=postgres://admin:admin-bootstrap-only@127.0.0.1:6432/marketplace
+export DB_HOST=127.0.0.1 DB_PORT=6432 DB_USER=admin DB_PASSWORD=admin-bootstrap-only DB_NAME=marketplace
+export SKIP_VAULT=1
+npm ci
+npx tsc --noEmit
+npm run migrate
+npm run demo:publish
+npm run demo:dlq
+npm run demo:duplicate
+```
+
+Management UI: http://127.0.0.1:15672 (app/app). AMQP — лише порт **5672**.

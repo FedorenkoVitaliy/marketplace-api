@@ -27,7 +27,10 @@
     "watch:pools": "bash scripts/watch-pools.sh",
     "demo:nplus1": "bash scripts/with-secrets.sh dev node dist/src/demo-nplus1.js",
     "report": "bash scripts/with-secrets.sh dev node dist/src/report.js",
-    "demo:realtime": "node scripts/realtime-demo.mjs"
+    "demo:realtime": "node scripts/realtime-demo.mjs",
+    "demo:publish": "npm run build && bash scripts/with-secrets.sh dev node dist/src/demo-publish.js",
+    "demo:dlq": "npm run build && bash scripts/with-secrets.sh dev node dist/src/demo-dlq.js",
+    "demo:duplicate": "npm run build && bash scripts/with-secrets.sh dev node dist/src/demo-duplicate.js"
   },
   "engines": {
     "node": ">=22"
@@ -54,6 +57,7 @@
     "@nestjs/platform-express": "^11.2.3",
     "@nestjs/platform-socket.io": "^11.2.7",
     "@nestjs/websockets": "^11.2.7",
+    "amqplib": "^2.2.0",
     "dotenv": "^17.4.2",
     "express": "^4.22.2",
     "express-openapi-validator": "^5.6.2",
