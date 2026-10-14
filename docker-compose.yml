@@ -73,6 +73,22 @@ services:
       timeout: 3s
       retries: 30
 
+  rabbitmq:
+    image: rabbitmq:4.3.4-management-alpine
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    environment:
+      RABBITMQ_DEFAULT_USER: app
+      RABBITMQ_DEFAULT_PASS: app
+    healthcheck:
+      test: ["CMD-SHELL", "rabbitmq-diagnostics -q check_running && rabbitmq-diagnostics -q check_port_connectivity"]
+      interval: 5s
+      start_interval: 1s
+      start_period: 40s
+      timeout: 10s
+      retries: 10
+
 volumes:
   pgdata-restore:
     name: marketplace-pgdata-restore
