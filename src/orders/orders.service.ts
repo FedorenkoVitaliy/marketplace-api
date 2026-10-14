@@ -1,12 +1,18 @@
 import { BadRequestException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import type { Pool } from 'pg';
 import { getCurrentCursor, getNextCursor } from '../cursor.js';
+import { OrderEventsService } from './order-events.service.js';
 
 type OrderRow = { id: number; total_cents: number };
 
+const STATUSES = new Set(['pending', 'completed', 'cancelled']);
+
 @Injectable()
 export class OrdersService {
-  constructor(@Inject('PG_POOL') private readonly pool: Pool) {}
+  constructor(
+    @Inject('PG_POOL') private readonly pool: Pool,
+    private readonly events: OrderEventsService,
+  ) {}
 
   async list(limit?: string, cursor?: string) {
     const orders = await this.loadAll();
@@ -20,13 +26,14 @@ export class OrdersService {
   }
 
   async findById(id: number) {
-    const { rows } = await this.pool.query<OrderRow>(
+    const { rows } = await this.pool.query<OrderRow & { user_id: number }>(
       `SELECT o.id::int AS id,
+              o.user_id::int AS user_id,
               COALESCE(SUM(i.qty * i.unit_price), 0)::int AS total_cents
          FROM orders o
          LEFT JOIN order_items i ON i.order_id = o.id
         WHERE o.id = $1
-        GROUP BY o.id`,
+        GROUP BY o.id, o.user_id`,
       [id],
     );
     const order = rows[0];
@@ -34,6 +41,14 @@ export class OrdersService {
       throw new NotFoundException('Order not found');
     }
     return order;
+  }
+
+  async isOwnedBy(orderId: number, userId: string) {
+    const { rows } = await this.pool.query(
+      `SELECT 1 FROM orders WHERE id = $1 AND user_id = $2 LIMIT 1`,
+      [orderId, userId],
+    );
+    return rows.length > 0;
   }
 
   async create(items: number[]) {
@@ -63,13 +78,14 @@ export class OrdersService {
         }
       }
 
-      const inserted = await client.query<{ id: string }>(
+      const inserted = await client.query<{ id: string; user_id: string }>(
         `INSERT INTO orders (status, created_at, user_id)
          VALUES ('pending', now(), $1)
-         RETURNING id::text`,
+         RETURNING id::text, user_id::text`,
         [buyer.rows[0].id],
       );
       const orderId = inserted.rows[0].id;
+      const userId = inserted.rows[0].user_id;
 
       let total = 0;
       for (const productId of items) {
@@ -83,13 +99,34 @@ export class OrdersService {
       }
 
       await client.query('COMMIT');
-      return { id: Number(orderId), total_cents: total };
+      return { id: Number(orderId), total_cents: total, user_id: Number(userId) };
     } catch (error) {
       await client.query('ROLLBACK');
       throw error;
     } finally {
       client.release();
     }
+  }
+
+  async updateStatus(id: number, status: string) {
+    if (!STATUSES.has(status)) {
+      throw new BadRequestException('invalid status');
+    }
+
+     const { rows } = await this.pool.query<{ id: string; status: string }>(
+      `UPDATE orders SET status = $2
+        WHERE id = $1
+        RETURNING id::text, status`,
+      [id, status],
+    );
+    const row = rows[0];
+    if (!row) {
+      throw new NotFoundException('Order not found');
+    }
+
+    this.events.publish(row.id, row.status);
+
+    return { id: Number(row.id), status: row.status };
   }
 
   private async loadAll() {
