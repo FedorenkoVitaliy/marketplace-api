@@ -429,3 +429,29 @@ npm run demo:duplicate
 ```
 
 Management UI: http://127.0.0.1:15672 (app/app). AMQP — лише порт **5672**.
+
+## Distributed patterns (ДЗ#22)
+
+Dual-write `COMMIT` → `publish` закритий **transactional outbox**: `INSERT orders` + `INSERT outbox` в одній транзакції. Relay читає `WHERE published_at IS NULL … FOR UPDATE SKIP LOCKED`, публікує в RabbitMQ, потім ставить `published_at`. Між publish і UPDATE — щілина at-least-once: `SIGKILL` → подія вже в брокері, база «не знає» → рестарт публікує вдруге. Exactly-once **результат** дає `claimAndApply` (позначка + ефект в одному COMMIT).
+
+Платіжний шар: заморожений quote (копійки-integer, знижка один раз), ключ ідемпотентності `sha256("order:"+id)`, намір + outbox в одній транзакції, вебхук stub з HMAC над сирим тілом, леджер append-only (`SUM`, не `UPDATE` суми).
+
+| Демо | Що доводить |
+|---|---|
+| `demo:outbox` | crash між publish і `published_at` → `deliveries≥10 effect=5 skipped≥5` |
+| `demo:pay` | quote → intent → HMAC ok / duplicate / bad sig / amount mismatch |
+
+### ДЗ#22
+
+```bash
+docker compose up -d --wait
+export BROKER_URL=amqp://app:app@127.0.0.1:5672
+export DATABASE_URL=postgres://admin:admin-bootstrap-only@127.0.0.1:6432/marketplace
+export DB_HOST=127.0.0.1 DB_PORT=6432 DB_USER=admin DB_PASSWORD=admin-bootstrap-only DB_NAME=marketplace
+export SKIP_VAULT=1
+npm ci
+npx tsc --noEmit
+npm run migrate
+npm run demo:outbox
+npm run demo:pay
+```

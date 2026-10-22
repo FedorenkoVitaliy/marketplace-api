@@ -30,7 +30,10 @@
     "demo:realtime": "node scripts/realtime-demo.mjs",
     "demo:publish": "npm run build && bash scripts/with-secrets.sh dev node dist/src/demo-publish.js",
     "demo:dlq": "npm run build && bash scripts/with-secrets.sh dev node dist/src/demo-dlq.js",
-    "demo:duplicate": "npm run build && bash scripts/with-secrets.sh dev node dist/src/demo-duplicate.js"
+    "demo:duplicate": "npm run build && bash scripts/with-secrets.sh dev node dist/src/demo-duplicate.js",
+    "demo:outbox": "npm run build && bash scripts/with-secrets.sh dev node dist/src/demo-outbox.js",
+    "demo:pay": "npm run build && bash scripts/with-secrets.sh dev node dist/src/demo-pay.js",
+    "outbox:relay": "npm run build && bash scripts/with-secrets.sh dev node dist/src/messaging/outbox-relay-child.js"
   },
   "engines": {
     "node": ">=22"
