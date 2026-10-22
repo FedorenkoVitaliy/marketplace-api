@@ -1,7 +1,8 @@
 import { BadRequestException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import type { Pool } from 'pg';
 import { getCurrentCursor, getNextCursor } from '../cursor.js';
-import { publishOrderPlacedIfConfigured } from '../messaging/publisher.js';
+import { buildOrderPlaced } from '../messaging/events.js';
+import { insertOutbox } from '../messaging/outbox.js';
 import { OrderEventsService } from './order-events.service.js';
 
 type OrderRow = { id: number; total_cents: number };
@@ -99,15 +100,22 @@ export class OrdersService {
         );
       }
 
-      await client.query('COMMIT');
-      const result = { id: Number(orderId), total_cents: total, user_id: Number(userId) };
-      // Подія після COMMIT: брокер і БД без спільного COMMIT (outbox — ДЗ#22).
-      await publishOrderPlacedIfConfigured({
-        orderId: result.id,
-        userId: result.user_id,
-        totalCents: result.total_cents,
+      // Подія в тій самій транзакції: dual-write COMMIT↔publish закритий.
+      // Винос у брокер — окремий relay (at-least-once).
+      const event = buildOrderPlaced({
+        orderId,
+        userId,
+        totalCents: total,
       });
-      return result;
+      await insertOutbox(client, {
+        aggregateType: 'Order',
+        aggregateId: String(orderId),
+        type: 'order.placed',
+        payload: event,
+      });
+
+      await client.query('COMMIT');
+      return { id: Number(orderId), total_cents: total, user_id: Number(userId) };
     } catch (error) {
       await client.query('ROLLBACK');
       throw error;
