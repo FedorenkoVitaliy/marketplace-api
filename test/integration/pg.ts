@@ -6,10 +6,34 @@ import { OrderItem } from '../../src/entities/order-item.entity.js';
 import { Order } from '../../src/entities/order.entity.js';
 import { Product } from '../../src/entities/product.entity.js';
 import { User } from '../../src/entities/user.entity.js';
-import { AddJobs1790116349422 } from '../../src/migrations/1790116349422-AddJobs.js';
-import { AddProductStock1790032272412 } from '../../src/migrations/1790032272412-AddProductStock.js';
-import { AddUserBalance1790407200000 } from '../../src/migrations/1790407200000-AddUserBalance.js';
 import { InitSchema1789821128278 } from '../../src/migrations/1789821128278-InitSchema.js';
+import { AddProductStock1790032272412 } from '../../src/migrations/1790032272412-AddProductStock.js';
+import { AddJobs1790116349422 } from '../../src/migrations/1790116349422-AddJobs.js';
+import { AddUserBalance1790407200000 } from '../../src/migrations/1790407200000-AddUserBalance.js';
+import { AddProcessedMessages1790500000000 } from '../../src/migrations/1790500000000-AddProcessedMessages.js';
+import { AddOutboxAndPayments1790600000000 } from '../../src/migrations/1790600000000-AddOutboxAndPayments.js';
+
+/** Усі міграції застосунку. Нову — додай сюди, інакше Pact/e2e впаде на missing relation. */
+const MIGRATIONS = [
+  InitSchema1789821128278,
+  AddProductStock1790032272412,
+  AddJobs1790116349422,
+  AddUserBalance1790407200000,
+  AddProcessedMessages1790500000000,
+  AddOutboxAndPayments1790600000000,
+];
+
+const REQUIRED_TABLES = [
+  'users',
+  'products',
+  'orders',
+  'order_items',
+  'outbox',
+  'api_requests',
+  'payments',
+  'ledger_entries',
+  'processed_messages',
+] as const;
 
 export async function startPg() {
   const container = await new PostgreSqlContainer('postgres:16-alpine').start();
@@ -23,22 +47,32 @@ export async function startPg() {
     database: container.getDatabase(),
     synchronize: false,
     entities: [User, Product, Order, OrderItem, Job],
-    migrations: [
-      InitSchema1789821128278,
-      AddProductStock1790032272412,
-      AddJobs1790116349422,
-      AddUserBalance1790407200000,
-    ],
+    migrations: [...MIGRATIONS],
   });
   await dataSource.initialize();
   await dataSource.runMigrations();
+
   const pool = new Pool({ connectionString: uri });
+  const { rows } = await pool.query<{ name: string }>(
+    `SELECT tablename AS name FROM pg_tables WHERE schemaname = 'public'`,
+  );
+  const have = new Set(rows.map((r) => r.name));
+  const missing = REQUIRED_TABLES.filter((t) => !have.has(t));
+  if (missing.length) {
+    await pool.end();
+    await dataSource.destroy();
+    await container.stop();
+    throw new Error(`startPg: migrations incomplete, missing tables: ${missing.join(', ')}`);
+  }
+
   return {
     uri,
     pool,
     async reset() {
       await pool.query(
-        'TRUNCATE order_items, orders, products, jobs, users RESTART IDENTITY CASCADE',
+        `TRUNCATE ledger_entries, payments, api_requests, outbox,
+                 processed_messages, order_items, orders, products, jobs, users
+         RESTART IDENTITY CASCADE`,
       );
     },
     async stop() {

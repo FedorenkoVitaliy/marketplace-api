@@ -8,6 +8,8 @@ import { ExpressAdapter } from '@nestjs/platform-express';
 import { type Env } from './config/env.schema.js';
 
 export function mountHttp(app: Express): void {
+    // HMAC вебхука рахується над СИРИМИ байтами — до JSON.parse.
+    app.use('/webhooks', express.raw({ type: '*/*', limit: '1mb' }));
     app.use(express.json());
     app.use(middleware({
         apiSpec: 'openapi/openapi.yaml',
@@ -16,7 +18,9 @@ export function mountHttp(app: Express): void {
         ignorePaths: (path: string) =>
             path === '/health' ||
             path === '/db' ||
-            /^\/orders\/[^/]+\/events$/.test(path),
+            /^\/orders\/[^/]+\/events$/.test(path) ||
+            // raw Buffer + HMAC — OpenAPI JSON schema тут не застосовуємо
+            path.startsWith('/webhooks/'),
     }));
 }
 

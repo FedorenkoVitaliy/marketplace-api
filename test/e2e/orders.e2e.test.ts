@@ -32,8 +32,8 @@ describe('POST /orders', () => {
   });
 
   afterAll(async () => {
-    await close();
-    await pg.stop();
+    if (close) await close();
+    if (pg) await pg.stop();
   });
 
   it('створює замовлення і віддає його за id', async () => {
