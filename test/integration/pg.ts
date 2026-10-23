@@ -9,6 +9,8 @@ import { User } from '../../src/entities/user.entity.js';
 import { AddJobs1790116349422 } from '../../src/migrations/1790116349422-AddJobs.js';
 import { AddProductStock1790032272412 } from '../../src/migrations/1790032272412-AddProductStock.js';
 import { AddUserBalance1790407200000 } from '../../src/migrations/1790407200000-AddUserBalance.js';
+import { AddProcessedMessages1790500000000 } from '../../src/migrations/1790500000000-AddProcessedMessages.js';
+import { AddOutboxAndPayments1790600000000 } from '../../src/migrations/1790600000000-AddOutboxAndPayments.js';
 import { InitSchema1789821128278 } from '../../src/migrations/1789821128278-InitSchema.js';
 
 export async function startPg() {
@@ -28,6 +30,8 @@ export async function startPg() {
       AddProductStock1790032272412,
       AddJobs1790116349422,
       AddUserBalance1790407200000,
+      AddProcessedMessages1790500000000,
+      AddOutboxAndPayments1790600000000,
     ],
   });
   await dataSource.initialize();
@@ -38,7 +42,9 @@ export async function startPg() {
     pool,
     async reset() {
       await pool.query(
-        'TRUNCATE order_items, orders, products, jobs, users RESTART IDENTITY CASCADE',
+        `TRUNCATE ledger_entries, payments, api_requests, outbox,
+                 processed_messages, order_items, orders, products, jobs, users
+         RESTART IDENTITY CASCADE`,
       );
     },
     async stop() {
