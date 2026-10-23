@@ -72,6 +72,7 @@ async function main(): Promise<void> {
       orderId,
       amountMinor: quote.totalMinor,
       idempotencyKey: key,
+      currency: quote.currency,
     });
     providerRef = intent.providerRef;
     await client.query(

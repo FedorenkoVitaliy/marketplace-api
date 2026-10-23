@@ -1,27 +1,63 @@
 import {
   BadRequestException,
+  ConflictException,
   Inject,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import type { Pool } from 'pg';
+import type { Pool, PoolClient } from 'pg';
 import { insertOutbox } from '../messaging/outbox.js';
+import {
+  PAYMENT_PROVIDER,
+  type InboundEvent,
+  type PaymentProvider,
+  WebhookSignatureError,
+} from './port.js';
 import { freezeQuote, idempotencyKeyFor } from './pricing.js';
-import { StubProvider, type InboundEvent } from './stub-provider.js';
+import { StubProvider } from './stub-provider.js';
+
+type PayResponse = {
+  orderId: string;
+  state: string;
+  providerRef: string;
+  checkoutUrl?: string;
+  totalMinor: number;
+  idempotencyKey: string;
+  reused: boolean;
+};
 
 @Injectable()
 export class PaymentsService {
-  private readonly provider = new StubProvider(
-    process.env.PAYMENT_WEBHOOK_SECRET ?? 'stub-dev-secret',
-  );
+  constructor(
+    @Inject('PG_POOL') private readonly pool: Pool,
+    @Inject(PAYMENT_PROVIDER) private readonly provider: PaymentProvider,
+  ) {}
 
-  constructor(@Inject('PG_POOL') private readonly pool: Pool) {}
+  /**
+   * Створити платіжний намір + outbox (+ api_requests) в одній транзакції.
+   * Idempotency-Key: той самий ключ → той самий намір; інший ключ на той самий
+   * order — Conflict (правило №3: ключ = sha256(order_id)).
+   */
+  async createIntent(orderId: string, idempotencyKey?: string): Promise<PayResponse> {
+    const expectedKey = idempotencyKeyFor(orderId);
+    if (idempotencyKey && idempotencyKey !== expectedKey) {
+      throw new BadRequestException(
+        'Idempotency-Key must equal sha256(order_id) (rule #3)',
+      );
+    }
+    const key = idempotencyKey ?? expectedKey;
+    const apiKey = `pay:${key}`;
 
-  /** Створити платіжний намір + outbox в одній транзакції. */
-  async createIntent(orderId: string) {
     const client = await this.pool.connect();
     try {
       await client.query('BEGIN');
+
+      const cachedId = await this.readApiRequestOrderId(client, apiKey);
+      if (cachedId) {
+        const payload = await this.loadPayResponse(client, cachedId, key, true);
+        await client.query('COMMIT');
+        return payload;
+      }
 
       const order = await client.query<{
         id: string;
@@ -43,23 +79,18 @@ export class PaymentsService {
         [orderId],
       );
       if (existing.rows[0]) {
+        await this.writeApiRequest(client, apiKey, orderId);
+        const payload = await this.loadPayResponse(client, orderId, key, true);
         await client.query('COMMIT');
-        return {
-          orderId,
-          state: existing.rows[0].state,
-          providerRef: existing.rows[0].provider_ref,
-          totalMinor: Number(existing.rows[0].total_minor),
-          idempotencyKey: idempotencyKeyFor(orderId),
-          reused: true,
-        };
+        return payload;
       }
 
       const quote = freezeQuote(orderId, Number(order.rows[0].total));
-      const key = idempotencyKeyFor(orderId);
-      const intent = this.provider.createIntent({
+      const intent = await this.provider.createIntent({
         orderId,
         amountMinor: quote.totalMinor,
         idempotencyKey: key,
+        currency: quote.currency,
       });
 
       await client.query(
@@ -92,6 +123,7 @@ export class PaymentsService {
         },
       });
 
+      await this.writeApiRequest(client, apiKey, orderId);
       await client.query('COMMIT');
       return {
         orderId,
@@ -104,6 +136,9 @@ export class PaymentsService {
       };
     } catch (e) {
       await client.query('ROLLBACK');
+      if ((e as { code?: string }).code === '23505') {
+        throw new ConflictException('Idempotency-Key already used');
+      }
       throw e;
     } finally {
       client.release();
@@ -119,13 +154,15 @@ export class PaymentsService {
   ): Promise<{ outcome: string; httpStatus: number; note: string }> {
     let evt: InboundEvent;
     try {
-      evt = this.provider.parseWebhook(raw, headers);
+      evt = await this.provider.parseWebhook(raw, headers);
     } catch (e) {
-      return {
-        outcome: 'incident',
-        httpStatus: 400,
-        note: e instanceof Error ? e.message : 'bad signature',
-      };
+      const note =
+        e instanceof WebhookSignatureError
+          ? e.message
+          : e instanceof Error
+            ? e.message
+            : 'bad signature';
+      return { outcome: 'incident', httpStatus: 400, note };
     }
 
     const client = await this.pool.connect();
@@ -204,6 +241,9 @@ export class PaymentsService {
 
   /** Хелпер для демо: підписати подію як провайдер. */
   signDemoEvent(evt: InboundEvent) {
+    if (!(this.provider instanceof StubProvider)) {
+      throw new Error('demo signing only available for StubProvider');
+    }
     return this.provider.signWebhook(evt);
   }
 
@@ -214,5 +254,54 @@ export class PaymentsService {
       [orderId],
     );
     return Number(rows[0]?.s ?? 0);
+  }
+
+  private async readApiRequestOrderId(
+    client: PoolClient,
+    key: string,
+  ): Promise<string | null> {
+    const { rows } = await client.query<{ order_id: string }>(
+      `SELECT order_id::text FROM api_requests WHERE idempotency_key = $1`,
+      [key],
+    );
+    return rows[0]?.order_id ?? null;
+  }
+
+  private async writeApiRequest(
+    client: PoolClient,
+    key: string,
+    orderId: string,
+  ): Promise<void> {
+    await client.query(
+      `INSERT INTO api_requests (idempotency_key, order_id) VALUES ($1, $2)
+       ON CONFLICT (idempotency_key) DO NOTHING`,
+      [key, orderId],
+    );
+  }
+
+  private async loadPayResponse(
+    client: PoolClient,
+    orderId: string,
+    key: string,
+    reused: boolean,
+  ): Promise<PayResponse> {
+    const { rows } = await client.query<{
+      state: string;
+      provider_ref: string;
+      total_minor: string;
+    }>(
+      `SELECT state, provider_ref, total_minor::text FROM payments WHERE order_id = $1`,
+      [orderId],
+    );
+    if (!rows[0]) throw new NotFoundException('Payment not found');
+    return {
+      orderId,
+      state: rows[0].state,
+      providerRef: rows[0].provider_ref,
+      checkoutUrl: `https://pay.stub.local/${rows[0].provider_ref}`,
+      totalMinor: Number(rows[0].total_minor),
+      idempotencyKey: key,
+      reused,
+    };
   }
 }

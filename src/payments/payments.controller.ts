@@ -1,4 +1,4 @@
-import { Controller, Headers, Param, Post, Req, Res } from '@nestjs/common';
+import { Controller, Headers, HttpCode, Param, Post, Req, Res } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { PaymentsService } from './payments.service.js';
 
@@ -7,8 +7,13 @@ export class PaymentsController {
   constructor(private readonly payments: PaymentsService) {}
 
   @Post('orders/:id/pay')
-  pay(@Param('id') id: string) {
-    return this.payments.createIntent(id);
+  @HttpCode(200)
+  pay(
+    @Param('id') id: string,
+    @Headers('idempotency-key') idempotencyKey?: string,
+  ) {
+    // OpenAPI path id:integer coerce → number; порт/БД чекають string.
+    return this.payments.createIntent(String(id), idempotencyKey);
   }
 
   /**

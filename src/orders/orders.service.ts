@@ -1,11 +1,18 @@
-import { BadRequestException, Inject, Injectable, NotFoundException } from '@nestjs/common';
-import type { Pool } from 'pg';
+import {
+  BadRequestException,
+  ConflictException,
+  Inject,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
+import type { Pool, PoolClient } from 'pg';
 import { getCurrentCursor, getNextCursor } from '../cursor.js';
 import { buildOrderPlaced } from '../messaging/events.js';
 import { insertOutbox } from '../messaging/outbox.js';
 import { OrderEventsService } from './order-events.service.js';
 
-type OrderRow = { id: number; total_cents: number };
+type OrderRow = { id: number; total_cents: number; user_id?: number };
+type CreateOrderResult = { id: number; total_cents: number; user_id: number };
 
 const STATUSES = new Set(['pending', 'completed', 'cancelled']);
 
@@ -53,7 +60,12 @@ export class OrdersService {
     return rows.length > 0;
   }
 
-  async create(items: number[]) {
+  /**
+   * Idempotency-Key → api_requests: той самий ключ повертає той самий order.
+   * Ключ без тіла в таблиці — OpenAPI вимагає ключ; колізія ключів між різними
+   * клієнтами — Conflict (23505).
+   */
+  async create(items: number[], idempotencyKey?: string): Promise<CreateOrderResult> {
     if (!items.length) {
       throw new BadRequestException('items required');
     }
@@ -61,6 +73,14 @@ export class OrdersService {
     const client = await this.pool.connect();
     try {
       await client.query('BEGIN');
+
+      if (idempotencyKey) {
+        const cached = await this.readApiRequestOrder(client, `order:${idempotencyKey}`);
+        if (cached) {
+          await client.query('COMMIT');
+          return cached;
+        }
+      }
 
       const buyer = await client.query<{ id: string }>(
         'SELECT id FROM users ORDER BY id ASC LIMIT 1',
@@ -114,14 +134,52 @@ export class OrdersService {
         payload: event,
       });
 
+      const result: CreateOrderResult = {
+        id: Number(orderId),
+        total_cents: total,
+        user_id: Number(userId),
+      };
+
+      if (idempotencyKey) {
+        await client.query(
+          `INSERT INTO api_requests (idempotency_key, order_id) VALUES ($1, $2)`,
+          [`order:${idempotencyKey}`, orderId],
+        );
+      }
+
       await client.query('COMMIT');
-      return { id: Number(orderId), total_cents: total, user_id: Number(userId) };
+      return result;
     } catch (error) {
       await client.query('ROLLBACK');
+      if ((error as { code?: string }).code === '23505') {
+        throw new ConflictException('Idempotency-Key already used');
+      }
       throw error;
     } finally {
       client.release();
     }
+  }
+
+  private async readApiRequestOrder(
+    client: PoolClient,
+    key: string,
+  ): Promise<CreateOrderResult | null> {
+    const { rows } = await client.query<{ order_id: string }>(
+      `SELECT order_id::text FROM api_requests WHERE idempotency_key = $1`,
+      [key],
+    );
+    if (!rows[0]) return null;
+    const order = await client.query<CreateOrderResult>(
+      `SELECT o.id::int AS id,
+              o.user_id::int AS user_id,
+              COALESCE(SUM(i.qty * i.unit_price), 0)::int AS total_cents
+         FROM orders o
+         LEFT JOIN order_items i ON i.order_id = o.id
+        WHERE o.id = $1
+        GROUP BY o.id, o.user_id`,
+      [rows[0].order_id],
+    );
+    return order.rows[0] ?? null;
   }
 
   async updateStatus(id: number, status: string) {

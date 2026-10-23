@@ -3,6 +3,7 @@ import {
   Controller,
   ForbiddenException,
   Get,
+  Headers,
   HttpCode,
   Param,
   Patch,
@@ -72,8 +73,11 @@ export class OrdersController {
 
   @Post()
   @HttpCode(201)
-  create(@Body() body: { items: number[] }) {
-    return this.orders.create(body.items);
+  create(
+    @Body() body: { items: number[] },
+    @Headers('idempotency-key') idempotencyKey?: string,
+  ) {
+    return this.orders.create(body.items, idempotencyKey);
   }
 
   @Patch(':id/status')

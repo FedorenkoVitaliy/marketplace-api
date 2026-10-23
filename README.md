@@ -36,7 +36,7 @@ User stories:
 
 **База.** Postgres 16 у Docker Compose. Адмін `admin` лише для bootstrap (`init.sql` створює `app_user`). Застосунок ходить як `app_user`; пароль не з `process.env`, а з файла `secrets/db_password` на кожне нове зʼєднання пулу.
 
-**Асинхронність.** Поки синхронний request/response. Черги й outbox зʼявляться, коли зʼявиться Payment / Notification — не раніше, щоб не тягнути брокер «про запас».
+**Асинхронність.** Transactional outbox (`outbox` + relay `SKIP LOCKED`) → RabbitMQ; споживач — `claimAndApply` (позначка + ефект в одному COMMIT). Платіж — порт `PaymentProvider` (зараз `StubProvider`), вебхук HMAC, леджер append-only. HTTP-ідемпотентність create/pay — таблиця `api_requests`.
 
 **Auth.** У спеці `security: []`. Ролі закладені в домені; JWT/RBAC — ДЗ#24, не зараз.
 
