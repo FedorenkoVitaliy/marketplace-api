@@ -36,7 +36,7 @@ User stories:
 
 **База.** Postgres 16 у Docker Compose. Адмін `admin` лише для bootstrap (`init.sql` створює `app_user`). Застосунок ходить як `app_user`; пароль не з `process.env`, а з файла `secrets/db_password` на кожне нове зʼєднання пулу.
 
-**Асинхронність.** Поки синхронний request/response. Черги й outbox зʼявляться, коли зʼявиться Payment / Notification — не раніше, щоб не тягнути брокер «про запас».
+**Асинхронність.** Transactional outbox (`outbox` + relay `SKIP LOCKED`) → RabbitMQ; споживач — `claimAndApply` (позначка + ефект в одному COMMIT). Платіж — порт `PaymentProvider` (зараз `StubProvider`), вебхук HMAC, леджер append-only. HTTP-ідемпотентність create/pay — таблиця `api_requests`.
 
 **Auth.** У спеці `security: []`. Ролі закладені в домені; JWT/RBAC — ДЗ#24, не зараз.
 
@@ -429,3 +429,69 @@ npm run demo:duplicate
 ```
 
 Management UI: http://127.0.0.1:15672 (app/app). AMQP — лише порт **5672**.
+
+## Distributed patterns (ДЗ#22)
+
+Dual-write `COMMIT` → `publish` закритий **transactional outbox**: `INSERT orders` + `INSERT outbox` в одній транзакції. Relay читає `WHERE published_at IS NULL … FOR UPDATE SKIP LOCKED`, публікує в RabbitMQ, потім ставить `published_at`. Між publish і UPDATE — щілина at-least-once: `SIGKILL` → подія вже в брокері, база «не знає» → рестарт публікує вдруге. Exactly-once **результат** дає `claimAndApply` (позначка + ефект в одному COMMIT).
+
+Платіжний шар: заморожений quote (копійки-integer, знижка один раз), ключ ідемпотентності `sha256("order:"+id)`, намір + outbox в одній транзакції, вебхук stub з HMAC над сирим тілом, леджер append-only (`SUM`, не `UPDATE` суми).
+
+| Демо | Що доводить |
+|---|---|
+| `demo:outbox` | crash між publish і `published_at` → `deliveries≥10 effect=5 skipped≥5` |
+| `demo:pay` | quote → intent → HMAC ok / duplicate / bad sig / amount mismatch |
+
+### ДЗ#22
+
+```bash
+docker compose up -d --wait
+export BROKER_URL=amqp://app:app@127.0.0.1:5672
+export DATABASE_URL=postgres://admin:admin-bootstrap-only@127.0.0.1:6432/marketplace
+export DB_HOST=127.0.0.1 DB_PORT=6432 DB_USER=admin DB_PASSWORD=admin-bootstrap-only DB_NAME=marketplace
+export SKIP_VAULT=1
+npm ci
+npx tsc --noEmit
+npm run migrate
+npm run demo:outbox
+npm run demo:pay
+```
+
+## Redis: кеш, сесії, ліміти, черга
+
+Два інстанси Redis у `docker-compose.yml` — не дублювання «про запас». Кеш потребує `maxmemory` + `allkeys-lru`; BullMQ у документації вимагає `noeviction` («cannot work properly if Redis evicts keys arbitrarily»). `maxmemory-policy` одна на весь процес, `SELECT 1` її не розводить → потрібні два контейнери: `redis-cache:16379` і `redis-queue:16380` (+ AOF everysec).
+
+Сесії й rate-limit живуть на **черга-інстансі** (`REDIS_QUEUE_URL`, noeviction): `allkeys-lru` колись викине сесію → «магічне» розлогінення. Кеш — лише для cache-aside карток товару.
+
+| Модель | Вибір | Чому |
+|---|---|---|
+| Rate-limit | ковзне вікно (Lua/ZSET) | не дозволяємо 2× сплеск на межі фіксованого вікна; спільний лічильник для подів |
+| Stampede | `SET lock NX PX` + Lua compare-and-delete | один SELECT на холодний ключ; голий `DEL` знімає чужий лок |
+
+**Що буде, якщо stampede-лок зламається.** Два (або N) одночасні SELECT тієї самої картки товару — зайві походи в базу й кілька центів latency. Стан не псується: читання ідемпотентне. Саме тому лок тут — оптимізація, а не захист бізнес-інваріанта. Інваріант «не списати склад двічі» локом у Redis не захищаємо — для цього транзакція / унікальний ключ / fencing у сховищі запису.
+
+Числа з локального прогону 23.10.2026:
+
+| Демо | Вивід |
+|---|---|
+| `demo:cache` | `cache-lru=1 cache-maxmemory=1 warmed=60 ttl-distinct=40 concurrent=24 db-calls=1 db-calls-warm=0` |
+| `demo:session` | `requests=3 sessions=1 in-redis=1 ttl-renewed=1` |
+| `demo:ratelimit` | `instances=2 limit=5 requests=12 allowed=5 blocked=7 status=429 retry-after=1` |
+| `demo:queue` | `queue-noeviction=1 attempts=3 completed=1 added=2 queued=1 schedulers=1 scheduled-runs=2` |
+
+### ДЗ#23
+
+```bash
+docker compose up -d --wait
+export REDIS_URL=redis://127.0.0.1:16379
+export REDIS_QUEUE_URL=redis://127.0.0.1:16380
+export DATABASE_URL=postgres://admin:admin-bootstrap-only@127.0.0.1:6432/marketplace
+export DB_HOST=127.0.0.1 DB_PORT=6432 DB_USER=admin DB_PASSWORD=admin-bootstrap-only DB_NAME=marketplace
+export SKIP_VAULT=1
+npm ci
+npx tsc --noEmit
+npm run demo:cache
+npm run demo:session
+npm run demo:ratelimit
+npm run demo:queue
+```
+

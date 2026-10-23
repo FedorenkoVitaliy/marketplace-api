@@ -251,6 +251,76 @@ paths:
             application/problem+json:
               schema:
                 $ref: '#/components/schemas/Problem'
+  /orders/{id}/pay:
+    post:
+      operationId: createPaymentIntent
+      summary: Create payment intent for order (frozen quote + outbox)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: Idempotency-Key
+          in: header
+          required: false
+          description: "Must equal sha256(\"order:\"+id) when set (rule #3). Replay returns same intent."
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Payment intent created or reused
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaymentIntent'
+        '400':
+          description: Bad Idempotency-Key or request
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '404':
+          description: Order not found
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '409':
+          description: Idempotency-Key conflict
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+  /webhooks/stub:
+    post:
+      operationId: stubPaymentWebhook
+      summary: Stub provider webhook (HMAC over raw body)
+      description: >
+        Validated outside OpenAPI (express.raw + HMAC). Documented here for contract
+        completeness; runtime path is ignorePaths for raw Buffer verification.
+      parameters:
+        - name: x-stub-signature
+          in: header
+          required: true
+          schema:
+            type: string
+            description: hex HMAC-SHA256 of raw body
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StubWebhookEvent'
+      responses:
+        '200':
+          description: Applied, duplicate, or unknown-order ack
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WebhookResult'
+        '400':
+          description: Bad signature or amount mismatch (incident)
 
 components:
   schemas:
@@ -305,3 +375,67 @@ components:
           items:
             type: integer
             description: "Product id"
+    PaymentIntent:
+      type: object
+      additionalProperties: false
+      required:
+        - orderId
+        - state
+        - providerRef
+        - totalMinor
+        - idempotencyKey
+        - reused
+      properties:
+        orderId:
+          type: string
+        state:
+          type: string
+        providerRef:
+          type: string
+        checkoutUrl:
+          type: string
+        totalMinor:
+          type: integer
+        idempotencyKey:
+          type: string
+        reused:
+          type: boolean
+    StubWebhookEvent:
+      type: object
+      additionalProperties: false
+      required:
+        - eventId
+        - orderId
+        - status
+        - amountMinor
+        - occurredAt
+        - providerRef
+      properties:
+        eventId:
+          type: string
+        orderId:
+          type: string
+        status:
+          type: string
+          enum: [pending, authorized, succeeded, failed, reverted, expired]
+        amountMinor:
+          type: integer
+        occurredAt:
+          type: string
+          format: date-time
+        providerRef:
+          type: string
+    WebhookResult:
+      type: object
+      additionalProperties: false
+      required:
+        - outcome
+        - httpStatus
+        - note
+      properties:
+        outcome:
+          type: string
+        httpStatus:
+          type: integer
+        note:
+          type: string
