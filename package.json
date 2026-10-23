@@ -33,6 +33,10 @@
     "demo:duplicate": "npm run build && bash scripts/with-secrets.sh dev node dist/src/demo-duplicate.js",
     "demo:outbox": "npm run build && bash scripts/with-secrets.sh dev node dist/src/demo-outbox.js",
     "demo:pay": "npm run build && bash scripts/with-secrets.sh dev node dist/src/demo-pay.js",
+    "demo:cache": "npm run build && bash scripts/with-secrets.sh dev node dist/src/demo-cache.js",
+    "demo:session": "npm run build && bash scripts/with-secrets.sh dev node dist/src/demo-session.js",
+    "demo:ratelimit": "npm run build && bash scripts/with-secrets.sh dev node dist/src/demo-ratelimit.js",
+    "demo:queue": "npm run build && bash scripts/with-secrets.sh dev node dist/src/demo-queue.js",
     "outbox:relay": "npm run build && bash scripts/with-secrets.sh dev node dist/src/messaging/outbox-relay-child.js"
   },
   "engines": {
@@ -61,9 +65,11 @@
     "@nestjs/platform-socket.io": "^11.2.7",
     "@nestjs/websockets": "^11.2.7",
     "amqplib": "^2.2.0",
+    "bullmq": "^6.4.0",
     "dotenv": "^17.4.2",
     "express": "^4.22.2",
     "express-openapi-validator": "^5.6.2",
+    "ioredis": "^5.11.1",
     "pg": "^8.23.0",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.2",
