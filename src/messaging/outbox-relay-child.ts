@@ -1,5 +1,5 @@
 /**
- * Окремий процес релея — щоб demo:outbox міг зробити SIGKILL
+ * Окремий процес релея — щоб demo:crash-relay міг зробити SIGKILL
  * між publish і UPDATE published_at.
  *
  * Env: CHILD_CRASH=1, CHILD_LAG_MS, DATABASE_URL / DB_URL, BROKER_URL

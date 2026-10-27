@@ -434,12 +434,16 @@ Management UI: http://127.0.0.1:15672 (app/app). AMQP — лише порт **56
 
 Dual-write `COMMIT` → `publish` закритий **transactional outbox**: `INSERT orders` + `INSERT outbox` в одній транзакції. Relay читає `WHERE published_at IS NULL … FOR UPDATE SKIP LOCKED`, публікує в RabbitMQ, потім ставить `published_at`. Між publish і UPDATE — щілина at-least-once: `SIGKILL` → подія вже в брокері, база «не знає» → рестарт публікує вдруге. Exactly-once **результат** дає `claimAndApply` (позначка + ефект в одному COMMIT).
 
+**Чому не навпаки (спочатку `UPDATE published_at`, потім publish).** Якщо процес помре між ними — рядок позначений «винесеним», а в брокера його немає: подія **втрачена**, релей її більше не візьме. Дубль лікується ідемпотентним споживачем; втрату — ні. Тому спочатку publish (можна повторити), і лише потім позначка.
+
 Платіжний шар: заморожений quote (копійки-integer, знижка один раз), ключ ідемпотентності `sha256("order:"+id)`, намір + outbox в одній транзакції, вебхук stub з HMAC над сирим тілом, леджер append-only (`SUM`, не `UPDATE` суми).
 
-| Демо | Що доводить |
-|---|---|
-| `demo:outbox` | crash між publish і `published_at` → `deliveries≥10 effect=5 skipped≥5` |
-| `demo:pay` | quote → intent → HMAC ok / duplicate / bad sig / amount mismatch |
+| Демо | Що доводить | Числа прогону |
+|---|---|---|
+| `demo:crash-write` | SIGKILL до COMMIT → ні order, ні outbox | `write-failed=1 orders=0 outbox=0` |
+| `demo:crash-relay` | SIGKILL між publish і `published_at` | `deliveries=10 effect=5 skipped=5` |
+| `demo:outbox` | happy path + Idempotency-Key | `requests=2 orders=1 processed=1` |
+| `demo:pay` | quote → intent → HMAC / duplicate / incident | `webhook_2=duplicate` |
 
 ### ДЗ#22
 
@@ -452,6 +456,8 @@ export SKIP_VAULT=1
 npm ci
 npx tsc --noEmit
 npm run migrate
+npm run demo:crash-write
+npm run demo:crash-relay
 npm run demo:outbox
 npm run demo:pay
 ```
