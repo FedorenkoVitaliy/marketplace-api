@@ -32,6 +32,8 @@
     "demo:dlq": "npm run build && bash scripts/with-secrets.sh dev node dist/src/demo-dlq.js",
     "demo:duplicate": "npm run build && bash scripts/with-secrets.sh dev node dist/src/demo-duplicate.js",
     "demo:outbox": "npm run build && bash scripts/with-secrets.sh dev node dist/src/demo-outbox.js",
+    "demo:crash-write": "npm run build && bash scripts/with-secrets.sh dev node dist/src/demo-crash-write.js",
+    "demo:crash-relay": "npm run build && bash scripts/with-secrets.sh dev node dist/src/demo-crash-relay.js",
     "demo:pay": "npm run build && bash scripts/with-secrets.sh dev node dist/src/demo-pay.js",
     "demo:cache": "npm run build && bash scripts/with-secrets.sh dev node dist/src/demo-cache.js",
     "demo:session": "npm run build && bash scripts/with-secrets.sh dev node dist/src/demo-session.js",

@@ -1,128 +1,78 @@
 /**
- * Головне демо ДЗ#22: SIGKILL між publish і UPDATE published_at.
- * 5 подій → 10 доставок у брокер → 5 ефектів (дедуп у Postgres).
+ * demo:outbox — happy path: 2 POST /orders з тим самим Idempotency-Key
+ * → 1 order; relay + споживач → processed=1.
  */
-import { fork, type ChildProcess } from 'node:child_process';
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { createPool } from './db.js';
+import { createHttpApp } from './main.js';
 import { depth, sleep, waitFor, withChannel } from './messaging/amqp.js';
 import { QUEUE } from './messaging/constants.js';
 import { closeEffectsPool, effectCount, resetState } from './messaging/effects.js';
-import { buildOrderPlaced } from './messaging/events.js';
-import { insertOutbox, outboxCount, unpublishedCount, relayPass } from './messaging/outbox.js';
-import { resetTopology } from './messaging/topology.js';
 import { ConsumerProcess } from './messaging/consumer-process.js';
+import { relayPass } from './messaging/outbox.js';
+import { resetTopology } from './messaging/topology.js';
+import { seedCatalog } from '../test/integration/seed-catalog.js';
 
-const CHILD = join(dirname(fileURLToPath(import.meta.url)), 'messaging/outbox-relay-child.js');
-const CONSUMER = 'demo-outbox';
-const N = 5;
-
-type ChildEvt = { t: string; n?: number };
-
-function runCrashRelay(): Promise<{ published: number; signal: NodeJS.Signals | null }> {
-  return new Promise((resolve, reject) => {
-    const child: ChildProcess = fork(CHILD, [], {
-      env: {
-        ...process.env,
-        CHILD_CRASH: '1',
-        CHILD_LAG_MS: '500',
-      },
-      stdio: ['ignore', 'inherit', 'inherit', 'ipc'],
-    });
-    let published = 0;
-    let settled = false;
-    const finish = (signal: NodeJS.Signals | null) => {
-      if (settled) return;
-      settled = true;
-      resolve({ published, signal });
-    };
-    child.on('message', (m: ChildEvt) => {
-      if (m.t === 'published') {
-        published = m.n ?? 0;
-        child.kill('SIGKILL');
-      }
-    });
-    child.on('exit', (_code, signal) => finish(signal));
-    child.on('error', reject);
-    setTimeout(() => {
-      child.kill('SIGKILL');
-      reject(new Error('timeout waiting for relay publish'));
-    }, 20_000);
-  });
-}
+const CONSUMER = 'demo-outbox-happy';
+const IDEM = `hw22-outbox-${Date.now()}`;
 
 async function main(): Promise<void> {
   const url = process.env.DATABASE_URL || process.env.DB_URL;
   if (!url) throw new Error('DATABASE_URL або DB_URL не задано');
+
+  process.env.DATABASE_URL = url;
+  process.env.DB_URL = url;
+  process.env.PORT = process.env.PORT ?? '3022';
+  process.env.LOG_LEVEL = 'error';
+
   const pool = createPool(url);
+  await seedCatalog(pool, {
+    buyerEmail: 'outbox-buyer@demo.test',
+    sellerEmail: 'outbox-seller@demo.test',
+  });
+
+  const product = await pool.query<{ id: string }>(
+    `SELECT id::text FROM products WHERE name = 'Blue Shirt' LIMIT 1`,
+  );
+  if (!product.rows[0]) throw new Error('product missing after seed');
+  const productId = Number(product.rows[0].id);
 
   await resetState(CONSUMER);
-  await pool.query('TRUNCATE outbox');
-
   await withChannel(async (ch) => {
     await resetTopology(ch);
   });
 
-  const client = await pool.connect();
-  try {
-    await client.query('BEGIN');
-    for (let i = 1; i <= N; i++) {
-      const event = buildOrderPlaced({
-        orderId: 2000 + i,
-        userId: 1,
-        totalCents: 100 * i,
-      });
-      await insertOutbox(client, {
-        aggregateType: 'Order',
-        aggregateId: String(2000 + i),
-        type: 'order.placed',
-        payload: event,
-      });
-    }
-    await client.query('COMMIT');
-  } finally {
-    client.release();
+  const http = await createHttpApp();
+  await http.listen(0);
+  const base = http.url();
+
+  const post = () =>
+    fetch(`${base}/orders`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Idempotency-Key': IDEM,
+      },
+      body: JSON.stringify({ items: [productId] }),
+    });
+
+  const r1 = await post();
+  const r2 = await post();
+  const requests = 2;
+  if (!r1.ok || !r2.ok) {
+    throw new Error(`POST /orders → ${r1.status}/${r2.status}`);
   }
+  const b1 = (await r1.json()) as { id: number };
+  const b2 = (await r2.json()) as { id: number };
+  if (b1.id !== b2.id) throw new Error(`idempotency broke: ${b1.id} ≠ ${b2.id}`);
 
-  console.log(`outbox_seeded=${await outboxCount(pool)}`);
+  const { rows: orderRows } = await pool.query<{ n: string }>(
+    `SELECT count(*)::text AS n FROM orders WHERE id = $1`,
+    [b1.id],
+  );
+  const orders = Number(orderRows[0]?.n ?? 0);
 
-  // Прохід 1: publish → SIGKILL до UPDATE (транзакція релея відкочується)
-  const crash = await runCrashRelay();
-  console.log(`crash_published=${crash.published}`);
-  console.log(`crash_signal=${crash.signal}`);
-  await sleep(200);
+  await relayPass(pool, { crashBeforeUpdate: false });
 
-  const stillUnpublished = await unpublishedCount(pool);
-  console.log(`unpublished_after_crash=${stillUnpublished}`);
-
-  let depthAfterCrash = 0;
-  await withChannel(async (ch) => {
-    await waitFor(
-      'черга після crash',
-      async () => (await depth(ch, QUEUE)) >= N,
-      15_000,
-    );
-    depthAfterCrash = await depth(ch, QUEUE);
-  });
-  console.log(`broker_after_crash=${depthAfterCrash}`);
-
-  // Прохід 2: релей чесно добиває ті самі рядки → дублі в брокері
-  const second = await relayPass(pool, { crashBeforeUpdate: false });
-  console.log(`relay_second_pass=${second}`);
-
-  let depthAfterSecond = 0;
-  await withChannel(async (ch) => {
-    await waitFor(
-      'черга після другого проходу',
-      async () => (await depth(ch, QUEUE)) >= N * 2,
-      15_000,
-    );
-    depthAfterSecond = await depth(ch, QUEUE);
-  });
-  console.log(`broker_after_second=${depthAfterSecond}`);
-
-  // Споживач з claimAndApply: 10 доставок → 5 ефектів
   const consumer = new ConsumerProcess();
   consumer.start({
     CHILD_MODE: 'manual',
@@ -137,36 +87,21 @@ async function main(): Promise<void> {
     async () => withChannel(async (ch) => (await depth(ch, QUEUE)) === 0),
     20_000,
   );
-  await waitFor(
-    'ефекти',
-    async () => (await effectCount(CONSUMER)) >= N,
-    15_000,
-  );
-  await sleep(200);
+  await waitFor('ефект', async () => (await effectCount(CONSUMER)) >= 1, 15_000);
+  await sleep(150);
 
-  const deliveries = consumer.count('recv');
-  const effects = await effectCount(CONSUMER);
-  const skipped = consumer.count('skip');
-  const unpublished = await unpublishedCount(pool);
+  const processed = await effectCount(CONSUMER);
 
   await consumer.stop();
+  await http.close();
   await closeEffectsPool();
   await pool.end();
 
-  console.log(`deliveries=${deliveries}`);
-  console.log(`effect=${effects}`);
-  console.log(`skipped=${skipped}`);
-  console.log(`unpublished_final=${unpublished}`);
+  console.log(`requests=${requests}`);
+  console.log(`orders=${orders}`);
+  console.log(`processed=${processed}`);
 
-  const ok =
-    crash.published === N &&
-    stillUnpublished === N &&
-    depthAfterSecond >= N * 2 &&
-    deliveries >= N * 2 &&
-    effects === N &&
-    skipped >= N &&
-    unpublished === 0;
-  process.exit(ok ? 0 : 1);
+  process.exit(requests === 2 && orders === 1 && processed === 1 ? 0 : 1);
 }
 
 main().catch(async (e) => {
