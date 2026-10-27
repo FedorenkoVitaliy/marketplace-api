@@ -16,7 +16,9 @@ jobs:
       - name: publish
         run: |
           npm run test:contract
-          docker compose up -d --wait
+          # Лише Pact Broker — не весь стек. Інакше rabbitmq інколи падає на runner
+          # (exit 1 під --wait), а Redis/Postgres contract-джобі не потрібні.
+          docker compose up -d --wait broker
           curl -fsS -X PUT \
             -H 'Content-Type: application/json' \
             --data-binary @pacts/marketplace-web-marketplace-api.json \
