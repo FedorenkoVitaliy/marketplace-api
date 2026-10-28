@@ -5,6 +5,7 @@ import { afterAll, beforeAll, describe, it } from '@jest/globals';
 import { Verifier } from '@pact-foundation/pact';
 import { Pool } from 'pg';
 import { createHttpApp } from '../../src/main.js';
+import { useTestJwtEnv } from '../integration/jwt-env.js';
 import { startPg } from '../integration/pg.js';
 import { seedCatalog } from '../integration/seed-catalog.js';
 
@@ -22,6 +23,7 @@ describe('verify marketplace-api', () => {
     process.env.DB_URL = pg.uri;
     process.env.PORT = '3217';
     process.env.LOG_LEVEL = 'error';
+    useTestJwtEnv();
     http = await createHttpApp();
     await http.listen(0);
   });

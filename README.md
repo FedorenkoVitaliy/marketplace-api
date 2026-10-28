@@ -501,3 +501,74 @@ npm run demo:ratelimit
 npm run demo:queue
 ```
 
+### ДЗ#24
+
+Грейдер клонує `hw-24`. Сховища немає — `SKIP_VAULT=1` і експорт імен змінних нижче. Нових `.env` немає. Демо-пароль акаунтів: `shop-demo-24` (`buyer@shop.test` / `seller@shop.test`).
+
+```bash
+docker compose up -d --wait
+export REDIS_URL=redis://127.0.0.1:16379
+export REDIS_QUEUE_URL=redis://127.0.0.1:16380
+export DATABASE_URL=postgres://admin:admin-bootstrap-only@127.0.0.1:6432/marketplace
+export DB_HOST=127.0.0.1 DB_PORT=6432 DB_USER=admin DB_PASSWORD=admin-bootstrap-only DB_NAME=marketplace
+# ES256 P-256: PEM → base64 (приватні ключі в git не класти)
+export JWT_PRIVATE_KEY=$(openssl ecparam -name prime256v1 -genkey -noout | openssl pkcs8 -topk8 -nocrypt | base64 | tr -d '\n')
+export JWT_PUBLIC_KEY=$(echo "$JWT_PRIVATE_KEY" | base64 -d | openssl ec -pubout 2>/dev/null | base64 | tr -d '\n')
+export JWT_KID=hw24
+export REFRESH_TOKEN_PEPPER=$(openssl rand -hex 32)
+export SKIP_VAULT=1
+npm ci
+npx tsc --noEmit
+npm run migrate
+npm run seed
+npm run demo:auth
+npm run demo:reuse
+npm run demo:rbac
+```
+
+Очікувані рядки:
+
+```
+# demo:auth
+login=200
+no-token=401
+with-token=200
+refresh=200
+logout=204
+after-logout=401
+refresh-after-logout=401
+
+# demo:reuse
+login=200
+r1-refresh=200
+r1-reuse=401
+r2-after-reuse=401
+
+# demo:rbac
+anon=401
+own=200
+foreign=403
+role-denied=403
+role-allowed=201
+tampered=401
+```
+
+## Auth
+
+Access — короткоживучий JWT **ES256** (P-256) через `jose`; refresh — opaque 32 B, у PG лише `HMAC-SHA256(pepper ‖ token)`.
+
+| Змінна | Джерело | Навіщо |
+|---|---|---|
+| `JWT_PRIVATE_KEY` | **сховище** | base64 PKCS#8 PEM, підпис access |
+| `JWT_PUBLIC_KEY` | **сховище** | base64 SPKI PEM, verify |
+| `JWT_KID` | **сховище** | активний `kid` у заголовку; overlap-ротація ключів — кілька публічних + один активний kid |
+| `REFRESH_TOKEN_PEPPER` | **сховище** | pepper для `token_hash` refresh |
+
+Чому **ES256**, не RS256: OWASP JWT Cheat Sheet позначає RS256 (PKCS#1 v1.5) як «Not recommended»; EC дає коротші ключі й менші токени при тому ж рівні безпеки. Verify завжди з явним `algorithms: ['ES256']` — алгоритм не береться з заголовка токена.
+
+**Denylist `jti`** живе в **queueRedis** (`REDIS_QUEUE_URL`, `noeviction`): це сесійна семантика, як і login-сесії з #23. `allkeys-lru` на cacheRedis міг би викинути denylist-ключ раніше за `exp` токена → access знову «оживе».
+
+**Logout = дві дії:** (1) `revoked_at` на всю `family_id` refresh у Postgres; (2) `SET auth:deny:<jti> EX <залишок до exp>` у queueRedis. Без денилиста access живе до `exp` навіть після logout.
+
+При старті декодуємо base64 → PEM → `KeyObject` і пишемо в лог **fingerprint** публічного ключа (sha256 SPKI, 16 hex), не сам PEM. Голий `npm start` без vault/експорту падає на Zod **до** DB і називає відсутню змінну (`JWT_*` / `REFRESH_TOKEN_PEPPER`).
+

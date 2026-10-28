@@ -44,6 +44,30 @@ paths:
             application/problem+json:
               schema:
                 $ref: '#/components/schemas/Problem'
+    post:
+      operationId: createProduct
+      summary: Create a product (seller or admin)
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateProduct'
+      responses:
+        '201':
+          description: Product created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Product'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
   /products/{id}:
     get:
       operationId: productsItem
@@ -137,7 +161,9 @@ paths:
   /orders/{id}:
     get:
       operationId: ordersItem
-      summary: Item of order list
+      summary: Item of order list (owner or admin)
+      security:
+        - bearerAuth: []
       parameters:
         - name: id
           in: path
@@ -151,6 +177,10 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Order'
+        '401':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
         '404':
           description: Not found order
           content: 
@@ -321,9 +351,105 @@ paths:
                 $ref: '#/components/schemas/WebhookResult'
         '400':
           description: Bad signature or amount mismatch (incident)
+  /auth/login:
+    post:
+      operationId: authLogin
+      summary: Exchange email + password for access JWT and refresh token
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [email, password]
+              properties:
+                email:
+                  type: string
+                password:
+                  type: string
+      responses:
+        '200':
+          $ref: '#/components/responses/TokenPair'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '401':
+          $ref: '#/components/responses/Problem'
+  /auth/refresh:
+    post:
+      operationId: authRefresh
+      summary: Rotate refresh token; reuse of a used token revokes the whole family
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [refreshToken]
+              properties:
+                refreshToken:
+                  type: string
+      responses:
+        '200':
+          $ref: '#/components/responses/TokenPair'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '401':
+          $ref: '#/components/responses/Problem'
+  /auth/logout:
+    post:
+      operationId: authLogout
+      summary: Revoke refresh family and denylist current access jti
+      security:
+        - bearerAuth: []
+      responses:
+        '204':
+          description: Logged out
+        '401':
+          $ref: '#/components/responses/Problem'
 
 components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  responses:
+    Problem:
+      description: Problem details
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    TokenPair:
+      description: Access JWT (ES256) + opaque refresh token
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: false
+            required: [accessToken, refreshToken]
+            properties:
+              accessToken:
+                type: string
+              refreshToken:
+                type: string
   schemas:
+    CreateProduct:
+      type: object
+      additionalProperties: false
+      required: [name, price]
+      properties:
+        name:
+          type: string
+          minLength: 1
+        price:
+          type: integer
+          minimum: 1
+        stock:
+          type: integer
+          minimum: 0
     Problem:
       type: object
       properties:

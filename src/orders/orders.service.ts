@@ -1,11 +1,13 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Inject,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
 import type { Pool, PoolClient } from 'pg';
+import type { AuthUser } from '../auth/auth.service.js';
 import { getCurrentCursor, getNextCursor } from '../cursor.js';
 import { buildOrderPlaced } from '../messaging/events.js';
 import { insertOutbox } from '../messaging/outbox.js';
@@ -48,6 +50,14 @@ export class OrdersService {
     const order = rows[0];
     if (!order) {
       throw new NotFoundException('Order not found');
+    }
+    return order;
+  }
+
+  async findOwned(id: number, user: AuthUser) {
+    const order = await this.findById(id);
+    if (user.role !== 'admin' && String(order.user_id) !== user.id) {
+      throw new ForbiddenException('not your order');
     }
     return order;
   }
