@@ -1,6 +1,6 @@
 /**
- * demo:crash-relay — SIGKILL між publish і UPDATE published_at.
- * 5 подій → 10 доставок у брокер → 5 ефектів (дедуп у Postgres).
+ * demo:crash-relay — одна подія: SIGKILL між publish і UPDATE published_at
+ * → 2 доставки в брокер → 1 ефект (дедуп). Контракт: deliveries=2 applied=1 effect=1.
  */
 import { fork, type ChildProcess } from 'node:child_process';
 import { dirname, join } from 'node:path';
@@ -8,15 +8,19 @@ import { fileURLToPath } from 'node:url';
 import { createPool } from './db.js';
 import { depth, sleep, waitFor, withChannel } from './messaging/amqp.js';
 import { QUEUE } from './messaging/constants.js';
-import { closeEffectsPool, effectCount, resetState } from './messaging/effects.js';
+import {
+  closeEffectsPool,
+  effectCount,
+  processedCount,
+  resetState,
+} from './messaging/effects.js';
 import { buildOrderPlaced } from './messaging/events.js';
-import { insertOutbox, outboxCount, unpublishedCount, relayPass } from './messaging/outbox.js';
+import { insertOutbox, unpublishedCount, relayPass } from './messaging/outbox.js';
 import { resetTopology } from './messaging/topology.js';
 import { ConsumerProcess } from './messaging/consumer-process.js';
 
 const CHILD = join(dirname(fileURLToPath(import.meta.url)), 'messaging/outbox-relay-child.js');
 const CONSUMER = 'demo-crash-relay';
-const N = 5;
 
 type ChildEvt = { t: string; n?: number };
 
@@ -67,62 +71,39 @@ async function main(): Promise<void> {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-    for (let i = 1; i <= N; i++) {
-      const event = buildOrderPlaced({
-        orderId: 2000 + i,
-        userId: 1,
-        totalCents: 100 * i,
-      });
-      await insertOutbox(client, {
-        aggregateType: 'Order',
-        aggregateId: String(2000 + i),
-        type: 'order.placed',
-        payload: event,
-      });
-    }
+    const event = buildOrderPlaced({
+      orderId: 2001,
+      userId: 1,
+      totalCents: 100,
+    });
+    await insertOutbox(client, {
+      aggregateType: 'Order',
+      aggregateId: '2001',
+      type: 'order.placed',
+      payload: event,
+    });
     await client.query('COMMIT');
   } finally {
     client.release();
   }
 
-  console.log(`outbox_seeded=${await outboxCount(pool)}`);
-
   // Прохід 1: publish → SIGKILL до UPDATE (транзакція релея відкочується)
   const crash = await runCrashRelay();
-  console.log(`crash_published=${crash.published}`);
-  console.log(`crash_signal=${crash.signal}`);
   await sleep(200);
 
   const stillUnpublished = await unpublishedCount(pool);
-  console.log(`unpublished_after_crash=${stillUnpublished}`);
 
-  let depthAfterCrash = 0;
   await withChannel(async (ch) => {
-    await waitFor(
-      'черга після crash',
-      async () => (await depth(ch, QUEUE)) >= N,
-      15_000,
-    );
-    depthAfterCrash = await depth(ch, QUEUE);
+    await waitFor('черга після crash', async () => (await depth(ch, QUEUE)) >= 1, 15_000);
   });
-  console.log(`broker_after_crash=${depthAfterCrash}`);
 
-  // Прохід 2: релей чесно добиває ті самі рядки → дублі в брокері
-  const second = await relayPass(pool, { crashBeforeUpdate: false });
-  console.log(`relay_second_pass=${second}`);
+  // Прохід 2: релей чесно добиває той самий рядок → дубль у брокері
+  await relayPass(pool, { crashBeforeUpdate: false });
 
-  let depthAfterSecond = 0;
   await withChannel(async (ch) => {
-    await waitFor(
-      'черга після другого проходу',
-      async () => (await depth(ch, QUEUE)) >= N * 2,
-      15_000,
-    );
-    depthAfterSecond = await depth(ch, QUEUE);
+    await waitFor('черга після другого проходу', async () => (await depth(ch, QUEUE)) >= 2, 15_000);
   });
-  console.log(`broker_after_second=${depthAfterSecond}`);
 
-  // Споживач з claimAndApply: 10 доставок → 5 ефектів
   const consumer = new ConsumerProcess();
   consumer.start({
     CHILD_MODE: 'manual',
@@ -137,16 +118,13 @@ async function main(): Promise<void> {
     async () => withChannel(async (ch) => (await depth(ch, QUEUE)) === 0),
     20_000,
   );
-  await waitFor(
-    'ефекти',
-    async () => (await effectCount(CONSUMER)) >= N,
-    15_000,
-  );
+  await waitFor('ефект', async () => (await effectCount(CONSUMER)) >= 1, 15_000);
   await sleep(200);
 
   const deliveries = consumer.count('recv');
+  const applied = consumer.count('effect');
+  const processed = await processedCount(CONSUMER);
   const effects = await effectCount(CONSUMER);
-  const skipped = consumer.count('skip');
   const unpublished = await unpublishedCount(pool);
 
   await consumer.stop();
@@ -154,17 +132,17 @@ async function main(): Promise<void> {
   await pool.end();
 
   console.log(`deliveries=${deliveries}`);
+  console.log(`applied=${applied}`);
+  console.log(`processed=${processed}`);
   console.log(`effect=${effects}`);
-  console.log(`skipped=${skipped}`);
-  console.log(`unpublished_final=${unpublished}`);
 
   const ok =
-    crash.published === N &&
-    stillUnpublished === N &&
-    depthAfterSecond >= N * 2 &&
-    deliveries >= N * 2 &&
-    effects === N &&
-    skipped >= N &&
+    crash.published === 1 &&
+    stillUnpublished === 1 &&
+    deliveries === 2 &&
+    applied === 1 &&
+    processed === 1 &&
+    effects === 1 &&
     unpublished === 0;
   process.exit(ok ? 0 : 1);
 }
