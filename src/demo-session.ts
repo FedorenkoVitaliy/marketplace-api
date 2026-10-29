@@ -1,18 +1,24 @@
 /**
  * ДЗ#23 demo:session — сесія в Redis (черга/noeviction) + rolling TTL.
  * Контракт: requests sessions in-redis ttl-renewed
+ * Без flushdb: прибираємо лише свої ключі через UNLINK.
  */
 import { closeRedis, queueRedis } from './redis/clients.js';
-import { createSession, sessionTtl, touchSession } from './redis/session.js';
+import {
+  createSession,
+  sessionKey,
+  sessionTtl,
+  touchSession,
+} from './redis/session.js';
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 async function main(): Promise<void> {
   // Сесії — на REDIS_QUEUE_URL (noeviction), не на кеш-LRU.
   const redis = queueRedis();
-  await redis.flushdb();
 
   const sid = await createSession(redis, { userId: 'demo' });
+  const key = sessionKey(sid);
 
   // Дати TTL зменшитись, інакше renew не видно.
   await sleep(2000);
@@ -27,7 +33,7 @@ async function main(): Promise<void> {
   }
 
   const ttlAfter = await sessionTtl(redis, sid);
-  const inRedis = (await redis.exists(`session:${sid}`)) === 1 ? 1 : 0;
+  const inRedis = (await redis.exists(key)) === 1 ? 1 : 0;
   const ttlRenewed = ttlAfter > ttlBefore ? 1 : 0;
 
   console.log(`requests=${requests}`);
@@ -35,6 +41,8 @@ async function main(): Promise<void> {
   console.log(`in-redis=${inRedis}`);
   console.log(`ttl-renewed=${ttlRenewed}`);
 
+  // Лише свій ключ — не зносимо BullMQ / rate-limit чужих демо.
+  await redis.unlink(key);
   await closeRedis(redis);
 
   if (requests < 3 || inRedis !== 1 || ttlRenewed !== 1) process.exit(1);
