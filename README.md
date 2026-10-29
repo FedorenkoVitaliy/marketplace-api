@@ -441,8 +441,8 @@ Dual-write `COMMIT` → `publish` закритий **transactional outbox**: `IN
 | Демо | Що доводить | Числа прогону |
 |---|---|---|
 | `demo:crash-write` | SIGKILL до COMMIT → ні order, ні outbox | `write-failed=1 orders=0 outbox=0` |
-| `demo:crash-relay` | SIGKILL між publish і `published_at` | `deliveries=10 effect=5 skipped=5` |
-| `demo:outbox` | happy path + Idempotency-Key | `requests=2 orders=1 processed=1` |
+| `demo:crash-relay` | SIGKILL між publish і `published_at` (1 подія) | `deliveries=2 applied=1 processed=1 effect=1` |
+| `demo:outbox` | happy path + Idempotency-Key | `requests=2 orders=1 outbox=1 published=1 deliveries=1 effect=1 processed=1` |
 | `demo:pay` | quote → intent → HMAC / duplicate / incident | `webhook_2=duplicate` |
 
 ### ДЗ#22
@@ -454,8 +454,10 @@ export DATABASE_URL=postgres://admin:admin-bootstrap-only@127.0.0.1:6432/marketp
 export DB_HOST=127.0.0.1 DB_PORT=6432 DB_USER=admin DB_PASSWORD=admin-bootstrap-only DB_NAME=marketplace
 export SKIP_VAULT=1
 npm ci
+npm run build
 npx tsc --noEmit
 npm run migrate
+npm run seed
 npm run demo:crash-write
 npm run demo:crash-relay
 npm run demo:outbox
@@ -494,7 +496,10 @@ export DATABASE_URL=postgres://admin:admin-bootstrap-only@127.0.0.1:6432/marketp
 export DB_HOST=127.0.0.1 DB_PORT=6432 DB_USER=admin DB_PASSWORD=admin-bootstrap-only DB_NAME=marketplace
 export SKIP_VAULT=1
 npm ci
+npm run build
 npx tsc --noEmit
+npm run migrate
+npm run seed
 npm run demo:cache
 npm run demo:session
 npm run demo:ratelimit

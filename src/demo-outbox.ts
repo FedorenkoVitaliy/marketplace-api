@@ -1,6 +1,6 @@
 /**
  * demo:outbox — happy path: 2 POST /orders з тим самим Idempotency-Key
- * → 1 order; relay + споживач → processed=1.
+ * → 1 order / 1 outbox; relay + споживач → deliveries=1 effect=1.
  */
 import { createPool } from './db.js';
 import { createHttpApp } from './main.js';
@@ -8,7 +8,7 @@ import { depth, sleep, waitFor, withChannel } from './messaging/amqp.js';
 import { QUEUE } from './messaging/constants.js';
 import { closeEffectsPool, effectCount, resetState } from './messaging/effects.js';
 import { ConsumerProcess } from './messaging/consumer-process.js';
-import { relayPass } from './messaging/outbox.js';
+import { outboxCount, unpublishedCount, relayPass } from './messaging/outbox.js';
 import { resetTopology } from './messaging/topology.js';
 import { seedCatalog } from '../test/integration/seed-catalog.js';
 
@@ -37,6 +37,7 @@ async function main(): Promise<void> {
   const productId = Number(product.rows[0].id);
 
   await resetState(CONSUMER);
+  await pool.query('TRUNCATE outbox');
   await withChannel(async (ch) => {
     await resetTopology(ch);
   });
@@ -70,8 +71,10 @@ async function main(): Promise<void> {
     [b1.id],
   );
   const orders = Number(orderRows[0]?.n ?? 0);
+  const outbox = await outboxCount(pool);
 
   await relayPass(pool, { crashBeforeUpdate: false });
+  const published = outbox - (await unpublishedCount(pool));
 
   const consumer = new ConsumerProcess();
   consumer.start({
@@ -90,7 +93,9 @@ async function main(): Promise<void> {
   await waitFor('ефект', async () => (await effectCount(CONSUMER)) >= 1, 15_000);
   await sleep(150);
 
+  const deliveries = consumer.count('recv');
   const processed = await effectCount(CONSUMER);
+  const effect = processed;
 
   await consumer.stop();
   await http.close();
@@ -99,9 +104,21 @@ async function main(): Promise<void> {
 
   console.log(`requests=${requests}`);
   console.log(`orders=${orders}`);
+  console.log(`outbox=${outbox}`);
+  console.log(`published=${published}`);
+  console.log(`deliveries=${deliveries}`);
+  console.log(`effect=${effect}`);
   console.log(`processed=${processed}`);
 
-  process.exit(requests === 2 && orders === 1 && processed === 1 ? 0 : 1);
+  const ok =
+    requests === 2 &&
+    orders === 1 &&
+    outbox === 1 &&
+    published === 1 &&
+    deliveries === 1 &&
+    effect === 1 &&
+    processed === 1;
+  process.exit(ok ? 0 : 1);
 }
 
 main().catch(async (e) => {

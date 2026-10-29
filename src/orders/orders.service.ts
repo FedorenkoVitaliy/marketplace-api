@@ -151,23 +151,41 @@ export class OrdersService {
       };
 
       if (idempotencyKey) {
-        await client.query(
-          `INSERT INTO api_requests (idempotency_key, order_id) VALUES ($1, $2)`,
+        // Паралельні запити з тим самим ключем: переможець один INSERT,
+        // другий — ON CONFLICT DO NOTHING і повертає вже збережене замовлення.
+        const claimed = await client.query(
+          `INSERT INTO api_requests (idempotency_key, order_id) VALUES ($1, $2)
+           ON CONFLICT DO NOTHING
+           RETURNING order_id`,
           [`order:${idempotencyKey}`, orderId],
         );
+        if ((claimed.rowCount ?? 0) === 0) {
+          await client.query('ROLLBACK');
+          const winner = await this.loadByIdempotencyKey(`order:${idempotencyKey}`);
+          if (!winner) {
+            throw new ConflictException('Idempotency-Key race without winner');
+          }
+          return winner;
+        }
       }
 
       await client.query('COMMIT');
       return result;
     } catch (error) {
       await client.query('ROLLBACK');
-      if ((error as { code?: string }).code === '23505') {
-        throw new ConflictException('Idempotency-Key already used');
-      }
       throw error;
     } finally {
       client.release();
     }
+  }
+
+  private async loadByIdempotencyKey(key: string): Promise<CreateOrderResult | null> {
+    const { rows } = await this.pool.query<{ order_id: string }>(
+      `SELECT order_id::text FROM api_requests WHERE idempotency_key = $1`,
+      [key],
+    );
+    if (!rows[0]) return null;
+    return this.findById(Number(rows[0].order_id)) as Promise<CreateOrderResult>;
   }
 
   private async readApiRequestOrder(
