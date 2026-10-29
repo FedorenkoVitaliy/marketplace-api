@@ -523,6 +523,7 @@ export JWT_KID=hw24
 export REFRESH_TOKEN_PEPPER=$(openssl rand -hex 32)
 export SKIP_VAULT=1
 npm ci
+npm run build
 npx tsc --noEmit
 npm run migrate
 npm run seed
@@ -571,9 +572,24 @@ Access — короткоживучий JWT **ES256** (P-256) через `jose`;
 
 Чому **ES256**, не RS256: OWASP JWT Cheat Sheet позначає RS256 (PKCS#1 v1.5) як «Not recommended»; EC дає коротші ключі й менші токени при тому ж рівні безпеки. Verify завжди з явним `algorithms: ['ES256']` — алгоритм не береться з заголовка токена.
 
+**Відбитки публічних ключів** (sha256 SPKI → 16 hex; у лог при старті, не PEM):
+
+| Оточення | `kid` | fingerprint |
+|---|---|---|
+| dev | `dev` | `bf56919e28a251b2` |
+| prod | `prod` | `0def4ec5177e62c4` |
+
+Різні відбитки = різні пари ключів: токен, підписаний у prod, не пройде verify у dev і навпаки. Overlap-ротація: новий `kid` підписує, старий публічний лишається в наборі verify, доки живі access зі старим `kid`.
+
 **Denylist `jti`** живе в **queueRedis** (`REDIS_QUEUE_URL`, `noeviction`): це сесійна семантика, як і login-сесії з #23. `allkeys-lru` на cacheRedis міг би викинути denylist-ключ раніше за `exp` токена → access знову «оживе».
 
-**Logout = дві дії:** (1) `revoked_at` на всю `family_id` refresh у Postgres; (2) `SET auth:deny:<jti> EX <залишок до exp>` у queueRedis. Без денилиста access живе до `exp` навіть після logout.
+**Logout = дві дії, у такому порядку:** (1) `SET auth:deny:<jti> EX <залишок до exp>` у queueRedis; (2) `revoked_at` на всю `family_id` refresh у Postgres. Денилист першим: якщо Redis падає, сімʼя ще жива і логаут можна повторити; навпаки лишило б access живим до `exp` при вже мертвій сімʼї. Без денилиста взагалі access живе до `exp` навіть після logout.
 
-При старті декодуємо base64 → PEM → `KeyObject` і пишемо в лог **fingerprint** публічного ключа (sha256 SPKI, 16 hex), не сам PEM. Голий `npm start` без vault/експорту падає на Zod **до** DB і називає відсутню змінну (`JWT_*` / `REFRESH_TOKEN_PEPPER`).
+**Гонка рефрешу на клієнті.** `UPDATE … SET used_at WHERE used_at IS NULL` робить другий паралельний рефреш тим самим токеном гілкою reuse → валить усю сімʼю. Це виглядає як компрометація, хоча це два запити одного фронта. **Обір:** серіалізація на клієнті — один спільний Promise на refresh для всіх 401; сервер навмисно без вікна благодаті, щоб `demo:reuse` лишався однозначним.
+
+**Межа власності.** Guard лише відповідає «хто це?» (Bearer + denylist). Чиє замовлення — у `OrdersService.findOwned` після `findById`: якщо не admin і `order.user_id ≠ user.id` → `403`. Гард ресурсу не тягне, бо йому ще немає рядка з БД.
+
+**Роль.** Для рішень (`role-allowed` / `role-denied`) `authenticate` читає `users.role` з БД на кожен запит, не claim з JWT. Розжалуваний адмін втрачає права **одразу**, не чекаючи `exp`. Claim `role` у токені — лише відбиток на момент видачі; якби авторизація йшла з нього, розжалування жило б до `exp` — свідомий компроміс короткого TTL, якого тут уникаємо саме читанням з БД.
+
+При старті декодуємо base64 → PEM → `KeyObject` і пишемо в лог fingerprint публічного ключа, не сам PEM. Голий `npm start` без vault/експорту падає на Zod **до** DB і називає відсутню змінну (`JWT_*` / `REFRESH_TOKEN_PEPPER`).
 
