@@ -81,11 +81,15 @@ export class AuthService implements OnModuleDestroy {
     };
   }
 
-  /** Дві дії: refresh-сімʼя мертва в PG, поточний access — у денилисті до свого exp. */
+  /**
+   * Дві дії логауту. Денилист access — першим: якщо Redis недоступний, падаємо
+   * з 500 і сімʼя ще жива (можна повторити). Навпаки (PG → Redis) лишило б
+   * access живим до exp при вже мертвій сімʼї.
+   */
   async logout(user: AuthUser): Promise<void> {
-    await revokeFamily(this.pool, user.familyId);
     const ttl = user.exp - Math.floor(Date.now() / 1000);
     if (ttl > 0) await this.denylist().set(denyKey(user.jti), '1', 'EX', ttl);
+    await revokeFamily(this.pool, user.familyId);
   }
 
   /** Підпис → денилист → роль з БД. Денилист після підпису: сміттєві токени не йдуть у Redis. */
