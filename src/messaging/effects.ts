@@ -39,6 +39,14 @@ export async function effectCount(consumer: string): Promise<number> {
   return Number(rows[0]?.n ?? 0);
 }
 
+export async function processedCount(consumer: string): Promise<number> {
+  const { rows } = await getEffectsPool().query<{ n: string }>(
+    `SELECT count(*)::text AS n FROM processed_messages WHERE consumer = $1`,
+    [consumer],
+  );
+  return Number(rows[0]?.n ?? 0);
+}
+
 /**
  * Позначка processed + ефект в одному COMMIT.
  * Дубль (ON CONFLICT) → 'duplicate' без нового ефекту.

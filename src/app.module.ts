@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { APP_FILTER } from '@nestjs/core';
 import { ConfigModule } from '@nestjs/config';
 import { OrdersModule } from './orders/orders.module.js';
+import { PaymentsModule } from './payments/payments.module.js';
 import { ProblemFilter } from './problem.filter.js';
 import { ProductsModule } from './products/products.module.js';
 import { validate } from './config/env.schema.js';
@@ -19,6 +20,7 @@ import { HealthController } from './health.controller.js';
       DbModule,
       ProductsModule,
       OrdersModule,
+      PaymentsModule,
     ],
     providers: [
       {

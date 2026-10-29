@@ -36,7 +36,7 @@ User stories:
 
 **База.** Postgres 16 у Docker Compose. Адмін `admin` лише для bootstrap (`init.sql` створює `app_user`). Застосунок ходить як `app_user`; пароль не з `process.env`, а з файла `secrets/db_password` на кожне нове зʼєднання пулу.
 
-**Асинхронність.** Поки синхронний request/response. Черги й outbox зʼявляться, коли зʼявиться Payment / Notification — не раніше, щоб не тягнути брокер «про запас».
+**Асинхронність.** Transactional outbox (`outbox` + relay `SKIP LOCKED`) → RabbitMQ; споживач — `claimAndApply` (позначка + ефект в одному COMMIT). Платіж — порт `PaymentProvider` (зараз `StubProvider`), вебхук HMAC, леджер append-only. HTTP-ідемпотентність create/pay — таблиця `api_requests`.
 
 **Auth.** У спеці `security: []`. Ролі закладені в домені; JWT/RBAC — ДЗ#24, не зараз.
 
@@ -429,3 +429,37 @@ npm run demo:duplicate
 ```
 
 Management UI: http://127.0.0.1:15672 (app/app). AMQP — лише порт **5672**.
+
+## Distributed patterns (ДЗ#22)
+
+Dual-write `COMMIT` → `publish` закритий **transactional outbox**: `INSERT orders` + `INSERT outbox` в одній транзакції. Relay читає `WHERE published_at IS NULL … FOR UPDATE SKIP LOCKED`, публікує в RabbitMQ, потім ставить `published_at`. Між publish і UPDATE — щілина at-least-once: `SIGKILL` → подія вже в брокері, база «не знає» → рестарт публікує вдруге. Exactly-once **результат** дає `claimAndApply` (позначка + ефект в одному COMMIT).
+
+**Чому не навпаки (спочатку `UPDATE published_at`, потім publish).** Якщо процес помре між ними — рядок позначений «винесеним», а в брокера його немає: подія **втрачена**, релей її більше не візьме. Дубль лікується ідемпотентним споживачем; втрату — ні. Тому спочатку publish (можна повторити), і лише потім позначка.
+
+Платіжний шар: заморожений quote (копійки-integer, знижка один раз), ключ ідемпотентності `sha256("order:"+id)`, намір + outbox в одній транзакції, вебхук stub з HMAC над сирим тілом, леджер append-only (`SUM`, не `UPDATE` суми).
+
+| Демо | Що доводить | Числа прогону |
+|---|---|---|
+| `demo:crash-write` | SIGKILL до COMMIT → ні order, ні outbox | `write-failed=1 orders=0 outbox=0` |
+| `demo:crash-relay` | SIGKILL між publish і `published_at` (1 подія) | `deliveries=2 applied=1 processed=1 effect=1` |
+| `demo:outbox` | happy path + Idempotency-Key | `requests=2 orders=1 outbox=1 published=1 deliveries=1 effect=1 processed=1` |
+| `demo:pay` | quote → intent → HMAC / duplicate / incident | `webhook_2=duplicate` |
+
+### ДЗ#22
+
+```bash
+docker compose up -d --wait
+export BROKER_URL=amqp://app:app@127.0.0.1:5672
+export DATABASE_URL=postgres://admin:admin-bootstrap-only@127.0.0.1:6432/marketplace
+export DB_HOST=127.0.0.1 DB_PORT=6432 DB_USER=admin DB_PASSWORD=admin-bootstrap-only DB_NAME=marketplace
+export SKIP_VAULT=1
+npm ci
+npm run build
+npx tsc --noEmit
+npm run migrate
+npm run seed
+npm run demo:crash-write
+npm run demo:crash-relay
+npm run demo:outbox
+npm run demo:pay
+```
