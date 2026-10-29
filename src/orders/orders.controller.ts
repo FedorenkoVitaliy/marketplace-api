@@ -12,8 +12,11 @@ import {
   Req,
   Res,
   UnauthorizedException,
+  UseGuards,
 } from '@nestjs/common';
 import type { Request, Response } from 'express';
+import { AuthGuard, CurrentUser } from '../auth/auth.guard.js';
+import type { AuthUser } from '../auth/auth.service.js';
 import { OrderEventsService } from './order-events.service.js';
 import { OrdersService } from './orders.service.js';
 
@@ -67,8 +70,9 @@ export class OrdersController {
   }
 
   @Get(':id')
-  getById(@Param('id') id: string) {
-    return this.orders.findById(Number(id));
+  @UseGuards(AuthGuard)
+  getById(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.orders.findOwned(Number(id), user);
   }
 
   @Post()

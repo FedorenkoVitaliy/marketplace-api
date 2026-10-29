@@ -11,6 +11,10 @@ export class User {
     email!: string
     @Column({ type: 'int', default: 0 })
     balance!: number
+    @Column({ type: 'text', nullable: true })
+    password_hash!: string | null
+    @Column({ type: 'text', default: 'buyer' })
+    role!: 'buyer' | 'seller' | 'admin'
     @OneToMany('Product', 'seller')
     products!: Relation<Product[]>
     @OneToMany('Order', 'user')

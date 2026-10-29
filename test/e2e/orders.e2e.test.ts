@@ -5,6 +5,8 @@ import { ExpressAdapter } from '@nestjs/platform-express';
 import express from 'express';
 import request from 'supertest';
 import { mountHttp } from '../../src/main.js';
+import type { ExecutionContext } from '@nestjs/common';
+import { useTestJwtEnv } from '../integration/jwt-env.js';
 import { startPg } from '../integration/pg.js';
 import { seedCatalog } from '../integration/seed-catalog.js';
 
@@ -19,13 +21,23 @@ describe('POST /orders', () => {
     process.env.DB_URL = pg.uri;
     process.env.PORT = '3216';
     process.env.LOG_LEVEL = 'error';
+    useTestJwtEnv();
     await seedCatalog(pg.pool, { buyerEmail: 'buyer@e2e.test', sellerEmail: 'seller@e2e.test' });
 
     http = express();
     mountHttp(http);
     // ConfigModule.forRoot({ validate }) — на імпорті AppModule; env уже виставлено вище.
     const { AppModule } = await import('../../src/app.module.js');
-    const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
+    const { AuthGuard } = await import('../../src/auth/auth.guard.js');
+    const moduleRef = await Test.createTestingModule({ imports: [AppModule] })
+      .overrideGuard(AuthGuard)
+      .useValue({
+        canActivate: (ctx: ExecutionContext) => {
+          ctx.switchToHttp().getRequest().user = { id: '0', role: 'admin' };
+          return true;
+        },
+      })
+      .compile();
     const app = moduleRef.createNestApplication(new ExpressAdapter(http), { bodyParser: false });
     await app.init();
     close = () => app.close();

@@ -1,4 +1,5 @@
 import dataSource from './data-source.js'
+import { seedAuthUsers } from './auth/demo-users.js'
 import { User } from './entities/user.entity.js'
 import { Product } from './entities/product.entity.js'
 import { Order } from './entities/order.entity.js'
@@ -81,5 +82,7 @@ for (const row of tickets) {
         await items.save(item)
     }
 }
+
+await seedAuthUsers(dataSource)
 
 await dataSource.destroy()

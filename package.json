@@ -8,6 +8,7 @@
     "build": "tsc",
     "typecheck": "tsc --noEmit",
     "start": "tsc && node dist/src/main.js",
+    "start:vault": "bash scripts/with-secrets.sh dev npm run start",
     "check:env": "tsc && node scripts/check-env-example.mjs",
     "test": "tsc && node --experimental-vm-modules node_modules/jest/bin/jest.js --config jest.config.cjs --testPathPatterns='dist/test/(integration|e2e|contract)'",
     "test:integration": "tsc && node --experimental-vm-modules node_modules/jest/bin/jest.js --config jest.config.cjs --testPathPatterns=dist/test/integration",
@@ -39,6 +40,9 @@
     "demo:session": "npm run build && bash scripts/with-secrets.sh dev node dist/src/demo-session.js",
     "demo:ratelimit": "npm run build && bash scripts/with-secrets.sh dev node dist/src/demo-ratelimit.js",
     "demo:queue": "npm run build && bash scripts/with-secrets.sh dev node dist/src/demo-queue.js",
+    "demo:auth": "npm run build && bash scripts/with-secrets.sh dev node dist/src/demo-auth.js",
+    "demo:reuse": "npm run build && bash scripts/with-secrets.sh dev node dist/src/demo-reuse.js",
+    "demo:rbac": "npm run build && bash scripts/with-secrets.sh dev node dist/src/demo-rbac.js",
     "outbox:relay": "npm run build && bash scripts/with-secrets.sh dev node dist/src/messaging/outbox-relay-child.js"
   },
   "engines": {
@@ -72,6 +76,7 @@
     "express": "^4.22.2",
     "express-openapi-validator": "^5.6.2",
     "ioredis": "^5.11.1",
+    "jose": "^6.2.13",
     "pg": "^8.23.0",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.2",
