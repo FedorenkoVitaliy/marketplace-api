@@ -496,7 +496,10 @@ export DATABASE_URL=postgres://admin:admin-bootstrap-only@127.0.0.1:6432/marketp
 export DB_HOST=127.0.0.1 DB_PORT=6432 DB_USER=admin DB_PASSWORD=admin-bootstrap-only DB_NAME=marketplace
 export SKIP_VAULT=1
 npm ci
+npm run build
 npx tsc --noEmit
+npm run migrate
+npm run seed
 npm run demo:cache
 npm run demo:session
 npm run demo:ratelimit
