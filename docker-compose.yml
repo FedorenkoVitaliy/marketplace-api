@@ -89,6 +89,42 @@ services:
       timeout: 10s
       retries: 10
 
+  # ДЗ#23: два Redis — несумісні maxmemory-policy. Порти поза 22300–22399 (лекція).
+  redis-cache:
+    image: redis:8-alpine
+    command:
+      - redis-server
+      - --maxmemory
+      - 64mb
+      - --maxmemory-policy
+      - allkeys-lru
+    ports:
+      - "16379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  redis-queue:
+    image: redis:8-alpine
+    # BullMQ вимагає noeviction (+ AOF everysec). Сесії/ліміт — теж сюди (не LRU).
+    command:
+      - redis-server
+      - --maxmemory-policy
+      - noeviction
+      - --appendonly
+      - "yes"
+      - --appendfsync
+      - everysec
+    ports:
+      - "16380:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
 volumes:
   pgdata-restore:
     name: marketplace-pgdata-restore
