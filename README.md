@@ -559,6 +559,66 @@ role-allowed=201
 tampered=401
 ```
 
+### ДЗ#26
+
+Грейдер клонує `hw-26`. Сховища немає — `SKIP_VAULT=1` і експорт нижче. Нових `.env` немає. `package.json` у корені репо, `cd` не потрібен.
+
+```bash
+docker compose up -d --wait
+export STORAGE_ENDPOINT=http://127.0.0.1:22650
+export STORAGE_ACCESS_KEY=hw26user
+export STORAGE_SECRET_KEY=hw26secretpass
+export STORAGE_BUCKET=hw26-files
+export REDIS_URL=redis://127.0.0.1:16379
+export REDIS_QUEUE_URL=redis://127.0.0.1:16380
+export DATABASE_URL=postgres://admin:admin-bootstrap-only@127.0.0.1:6432/marketplace
+export DB_URL="$DATABASE_URL"
+export DB_HOST=127.0.0.1 DB_PORT=6432 DB_USER=admin DB_PASSWORD=admin-bootstrap-only DB_NAME=marketplace
+export JWT_PRIVATE_KEY=$(openssl ecparam -name prime256v1 -genkey -noout | openssl pkcs8 -topk8 -nocrypt | base64 | tr -d '\n')
+export JWT_PUBLIC_KEY=$(echo "$JWT_PRIVATE_KEY" | base64 -d | openssl ec -pubout 2>/dev/null | base64 | tr -d '\n')
+export JWT_KID=hw24
+export REFRESH_TOKEN_PEPPER=$(openssl rand -hex 32)
+export SKIP_VAULT=1
+npm ci
+npm run build
+npx tsc --noEmit
+npm run migrate
+npm run seed
+npm run demo:upload
+npm run demo:multipart
+npm run demo:multipart
+npm run demo:cdn
+```
+
+`npm run build` перед `migrate` обов'язковий: інакше немає `dist/src/data-source.js`. `--wait` чекає healthcheck MinIO.
+
+Прогін 06.11.2026, обидва multipart підряд:
+
+```
+intent=200
+key-from-server=1
+api-alive=0
+put-offline=200
+commit=200
+commit-without-bytes=409
+tampered=403
+expired=403
+
+head-before-complete=404
+resumed-parts=1
+complete=200
+size-match=1
+etag-multipart=1
+
+direct=403
+edge-miss=200
+edge-hit=200
+cache-hit=1
+new-name=1
+new-url=200
+content-changed=1
+```
+
 ## Auth
 
 Access — короткоживучий JWT **ES256** (P-256) через `jose`; refresh — opaque 32 B, у PG лише `HMAC-SHA256(pepper ‖ token)`.
@@ -592,4 +652,55 @@ Access — короткоживучий JWT **ES256** (P-256) через `jose`;
 **Роль.** Для рішень (`role-allowed` / `role-denied`) `authenticate` читає `users.role` з БД на кожен запит, не claim з JWT. Розжалуваний адмін втрачає права **одразу**, не чекаючи `exp`. Claim `role` у токені — лише відбиток на момент видачі; якби авторизація йшла з нього, розжалування жило б до `exp` — свідомий компроміс короткого TTL, якого тут уникаємо саме читанням з БД.
 
 При старті декодуємо base64 → PEM → `KeyObject` і пишемо в лог fingerprint публічного ключа, не сам PEM. Голий `npm start` без vault/експорту падає на Zod **до** DB і називає відсутню змінну (`JWT_*` / `REFRESH_TOKEN_PEPPER`).
+
+## Files
+
+Шлях файла: `POST /uploads/intent` (гард із ДЗ #24, ключ `uploads/{userId}/{uuid}.ext` з allowlist contentType) → клієнт кладе байти за presigned URL → `POST /uploads/commit` робить `HeadObject` і лише тоді ставить `COMPLETED`. Ім'я файла від клієнта в ключ не потрапляє.
+
+Сховище — MinIO (`bitnamilegacy/minio:2025.7.23-debian-12-r5`) у наявному compose, API на `22650`. Офіційний `minio/minio` з Docker Hub знятий. Бакет приватний: анонімний GET дає 403. Публічні ассети віддає локальний edge на SDK (порт `22660`, заголовок `X-Cache: HIT|MISS`), не CloudFront і не nginx. До сховища ходить edge своїми креденшелами. Це локальна форма OAC.
+
+| Змінна | Джерело | Навіщо |
+|---|---|---|
+| `STORAGE_ENDPOINT` | **сховище** | S3 API; порожньо було б AWS, у стенді `http://127.0.0.1:22650` |
+| `STORAGE_ACCESS_KEY` | **сховище** | access key підпису і edge |
+| `STORAGE_SECRET_KEY` | **сховище** | secret key. Дев-пароль MinIO в compose — креденшел стенда, не секрет репо |
+| `STORAGE_BUCKET` | **сховище** | ім'я бакета, у стенді `hw26-files` |
+
+Строк presigned для аватарки з форми — **120 секунд**. Відкликати виданий URL нічим: немає `jti` і реєстру, лишається лише короткий строк. Сім діб не ставимо: SigV4 технічно живе до 7 діб, але в проді ключ майже завжди від STS і помирає за годину. Демо `expired` передає `expiresIn: 2`, щоб не спати хвилини; це не прод-строк.
+
+Поріг одного `PutObject` — **5 МіБ** (мінімум частини, крім останньої). Вище нього intent робить multipart. Розмір частини — `max(5 МіБ, ceil(файл / 10000))`, бо частин не більше 10 000. Остання частина може бути меншою. ETag після multipart має суфікс `-N` і не є MD5 файла.
+
+`Cache-Control: public, max-age=31536000, immutable` ставиться на об'єкт при публікації. Ім'я ассета містить хеш вмісту (`app.{hash}.css`), тож новий вміст — новий URL, інвалідацій нуль.
+
+Bucket policy для AWS + OAC (у цій здачі дистрибуцію не піднімаємо; без `Condition` доступ отримала б будь-яка дистрибуція у світі):
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "AllowCloudFrontServicePrincipalReadOnly",
+      "Effect": "Allow",
+      "Principal": { "Service": "cloudfront.amazonaws.com" },
+      "Action": "s3:GetObject",
+      "Resource": "arn:aws:s3:::my-bucket/*",
+      "Condition": {
+        "StringEquals": {
+          "AWS:SourceArn": "arn:aws:cloudfront::111122223333:distribution/E1234567890ABC"
+        }
+      }
+    }
+  ]
+}
+```
+
+Незавершені multipart тарифікуються, хоча об'єкта ще немає. Lifecycle `AbortIncompleteMultipartUpload` через 7 днів прибирає їх; правило «видалити все старше 30 днів» ці хвости не чіпає. На бакет стенда правило не вішаємо.
+
+Рядки `PENDING` старші за добу мала б добивати джоба BullMQ: `AbortMultipartUpload`, потім `DeleteObject`, потім видалити рядок. Інакше лишаються файли-сироти, про які база не знає. Джобу в цій здачі не запускаємо.
+
+Дамп із ДЗ #15 лишається в локальній теці `backups/`: призначення для нього — об'єктне сховище, але перенос у цій здачі зламав би restore-drill. Glacier — це не повільний S3, бо об'єкт спершу треба відновити, і lifecycle сам по собі не замінює `MATCH` із того drill.
+
+Приватний контент дистрибуції (не цей публічний edge) далі закривався б signed URL або signed cookies CloudFront на хвилину, з гардом на кожен запит. У коді цього немає.
+
+Числа прогону — у блоці `### ДЗ#26` вище.
 
