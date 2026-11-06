@@ -8,4 +8,8 @@ export function useTestJwtEnv(): void {
   process.env.JWT_PUBLIC_KEY = b64(publicKey.export({ type: 'spki', format: 'pem' }));
   process.env.JWT_KID = 'test';
   process.env.REFRESH_TOKEN_PEPPER = randomBytes(32).toString('hex');
+  process.env.STORAGE_ENDPOINT = 'http://127.0.0.1:9';
+  process.env.STORAGE_ACCESS_KEY = 'test-access-key';
+  process.env.STORAGE_SECRET_KEY = 'test-secret-key';
+  process.env.STORAGE_BUCKET = 'test-bucket';
 }
