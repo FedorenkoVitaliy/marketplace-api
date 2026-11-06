@@ -5,6 +5,7 @@ import { AuthModule } from './auth/auth.module.js';
 import { OrdersModule } from './orders/orders.module.js';
 import { PaymentsModule } from './payments/payments.module.js';
 import { ProblemFilter } from './problem.filter.js';
+import { FilesModule } from './files/files.module.js';
 import { ProductsModule } from './products/products.module.js';
 import { validate } from './config/env.schema.js';
 import { DbModule } from './db.module.js';
@@ -21,6 +22,7 @@ import { HealthController } from './health.controller.js';
       DbModule,
       AuthModule,
       ProductsModule,
+      FilesModule,
       OrdersModule,
       PaymentsModule,
     ],
