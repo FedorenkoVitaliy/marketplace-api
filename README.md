@@ -619,6 +619,63 @@ new-url=200
 content-changed=1
 ```
 
+### ДЗ#28
+
+Грейдер клонує `hw-28`. Сховища немає — `SKIP_VAULT=1` і експорт нижче. Нових `.env` немає. Бекенд Pulumi лише локальний файл, інакше `pulumi` піде в логін.
+
+```bash
+export SKIP_VAULT=1
+export APP_DB_PASSWORD=grader-secret
+export PULUMI_CONFIG_PASSPHRASE=hw28-grading
+export PULUMI_BACKEND_URL="file://$PWD/.pulumi"
+export PACT_BROKER_URL=http://127.0.0.1:21620
+export PACT_BROKER_TOKEN=grader-pact-token
+export JWT_PRIVATE_KEY=grader-jwt-private
+export JWT_PUBLIC_KEY=grader-jwt-public
+export JWT_KID=grader-kid
+export REFRESH_TOKEN_PEPPER=grader-pepper
+export STORAGE_ENDPOINT=http://127.0.0.1:22650
+export STORAGE_ACCESS_KEY=hw26user
+export STORAGE_SECRET_KEY=hw26secretpass
+export STORAGE_BUCKET=hw26-files
+printf 'dummy-npm-token' > .npm_token
+npm --prefix infra ci
+cd infra && npx tsc --noEmit
+cd ..
+npm run image:build
+npm run cluster:up
+npm run up
+npm run demo:image
+npm run demo:rollout
+npm run demo:pdb
+```
+
+Після перевірки: `npm run destroy && npm run cluster:down`.
+
+Прогін 06.11.2026:
+
+```
+stages=2
+shell-inside=0
+runtime-uid=65532
+token-in-history=0
+token-in-config=0
+token-in-layers=0
+
+profile=good
+requests=7721
+ok=7721
+failed=0
+rollout-seconds=15
+
+healthy=2
+minAvailable=1
+evict-1=201
+evict-2=429
+```
+
+`scan` на цьому ж образі порахував `found=7` при `severity=CRITICAL,HIGH`: з `SCAN_MAX=-1` вийшло `gate=fail` і код 1, з `SCAN_MAX=99999` — `gate=pass` і код 0. Другий викот підряд теж дав `failed=0`.
+
 ## Auth
 
 Access — короткоживучий JWT **ES256** (P-256) через `jose`; refresh — opaque 32 B, у PG лише `HMAC-SHA256(pepper ‖ token)`.
@@ -703,4 +760,37 @@ Bucket policy для AWS + OAC (у цій здачі дистрибуцію не
 Приватний контент дистрибуції (не цей публічний edge) далі закривався б signed URL або signed cookies CloudFront на хвилину, з гардом на кожен запит. У коді цього немає.
 
 Числа прогону — у блоці `### ДЗ#26` вище.
+
+## Kubernetes
+
+Кластер підіймав **kind** (один control-plane, `k8s/kind-config.yaml`, ім'я `hw28`). Окремого ліміта пам'яті, як у minikube `--memory`, у kind немає: вузол бере стільки, скільки дасть Docker. На цій машині Docker має 7,7 ГіБ; після `cluster:up` вузол `hw28-control-plane` займає близько 770 МіБ. minikube відсікає старт нижче 1800 МБ, тому його тут немає.
+
+Образ `marketplace-api:hw28` — дві стадії: збірка на `node:22-slim`, запуск на `gcr.io/distroless/nodejs22-debian12:nonroot`. У фіналі немає shell, процес під uid 65532 (`USER 65532` і `runAsUser: 65532`). Повний Nest у цей под не їде: йому потрібні Postgres, Redis і Rabbit, а вимір дивиться на те, чи живе сокет під викочуванням. Процес у поді відповідає на `/healthz`, поки живий, на `/readyz` лише коли готовий, і на SIGTERM спершу гасить `/readyz`, тримає дренаж 8 с і лише потім закриває сокет. До `listen` він чекає 4 с. `terminationGracePeriodSeconds` — 30, це більше за дренаж.
+
+Порт на хості `22980` → NodePort `30980`. Після кожної збірки `cluster:up` робить `kind load`: образ з хоста в кластері сам не з'являється.
+
+| Змінна | Джерело | Навіщо |
+|---|---|---|
+| `APP_DB_PASSWORD` | сховище (#11) | пароль до БД, їде в Secret `app-db` і в под через `secretKeyRef` |
+| `PULUMI_CONFIG_PASSPHRASE` | сховище (#11) | ключ шифрування стану Pulumi |
+| `PACT_BROKER_URL` | сховище | адреса брокера; без неї `pulumi preview` падає до кластера |
+| `PACT_BROKER_TOKEN` | сховище | токен брокера |
+| `JWT_PRIVATE_KEY` | сховище | ключ підпису; у Deployment лише не потрапляє значенням |
+| `JWT_PUBLIC_KEY` | сховище | ключ перевірки |
+| `JWT_KID` | сховище | активний kid |
+| `REFRESH_TOKEN_PEPPER` | сховище | pepper refresh-токена |
+| `STORAGE_ENDPOINT` | сховище | S3 API |
+| `STORAGE_ACCESS_KEY` | сховище | access key |
+| `STORAGE_SECRET_KEY` | сховище | secret key |
+| `STORAGE_BUCKET` | сховище | бакет |
+
+Програма в `infra/` перевіряє кожну з цих змінних першою дією і кидає її ім'я, якщо значення порожнє. Дефолтів немає. У Deployment значення немає: лише `secretKeyRef` на `APP_DB_PASSWORD`. Решта потрібна, щоб розгортання без сховища назвало саме ту змінну, яку зняли.
+
+`spec.replicas` лишається `2`, і поруч оголошений HPA `autoscaling/v2` (`minReplicas` 2, `maxReplicas` 4, CPU 70%). У kind немає metrics-server, тому HPA показує `cpu: <unknown>/70%` і репліки не чіпає — це очікувано, поле лишається за програмою. У бойовому кластері з metrics-server це вже конфлікт володіння: і Pulumi, і HPA пишуть `replicas`. Наступний `pulumi up` поверне число з програми і затре те, що виставив автоскейлер.
+
+Секрет рантайму приїжджає з тієї самої обгортки `scripts/with-secrets.sh`, що й раніше: програма кладе його в Secret (`data`, base64, не `stringData`), под читає посиланням. base64 тут не шифрування — у etcd локального кластера значення лежить відкритим текстом. Промисловий шлях інший: External Secrets Operator синхронізує секрет зі сховища в Secret, або CSI-драйвер монтує його файлом у под, без копії в etcd. Оператор у цей кластер не ставив.
+
+`startupProbe` на `/healthz`: `periodSeconds` 1 і `failureThreshold` 20 дають 20 с до першого рестарту, поки процес не почав слухати. Після першого успіху ця проба вимикається, і далі зависання ловить вже liveness (`periodSeconds` 10, `failureThreshold` 3 — близько 30 с). Якби той самий повільний старт прикривали лише `initialDelaySeconds` у liveness, довелося б тримати велику паузу і для мертвого процесу теж: перша перевірка зависання чекала б усю цю паузу, а не 30 с.
+
+Секрет збірки — файл `.npm_token` (у git його немає), змонтований як `RUN --mount=type=secret`. Приватного npm-реєстру немає, токен — приманка. Поріг сканера рахує `scripts/scan.sh` з звіту Trivy: `SCAN_MAX=-1` дає `gate=fail`, `SCAN_MAX=99999` дає `gate=pass`. Той самий скрипт викликає крок `.github/workflows/scan.yml` з `SCAN_MAX=99999`, бо в distroless лишаються виправні CRITICAL+HIGH, а база сканера їде щодоби. Зелений образ не обіцяємо.
 
