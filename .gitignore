@@ -10,3 +10,6 @@ spec.json
 backups/
 pacts/
 .state/
+.npm_token
+.pulumi/
+infra/node_modules/
