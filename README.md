@@ -638,6 +638,9 @@ export STORAGE_ENDPOINT=http://127.0.0.1:22650
 export STORAGE_ACCESS_KEY=hw26user
 export STORAGE_SECRET_KEY=hw26secretpass
 export STORAGE_BUCKET=hw26-files
+export OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:22918
+export PROMETHEUS_URL=http://127.0.0.1:22911
+export TRACE_API_URL=http://127.0.0.1:22904
 printf 'dummy-npm-token' > .npm_token
 npm --prefix infra ci
 cd infra && npx tsc --noEmit
@@ -675,6 +678,51 @@ evict-2=429
 ```
 
 `scan` на цьому ж образі порахував `found=7` при `severity=CRITICAL,HIGH`: з `SCAN_MAX=-1` вийшло `gate=fail` і код 1, з `SCAN_MAX=99999` — `gate=pass` і код 0. Другий викот підряд теж дав `failed=0`.
+
+### ДЗ#29
+
+Грейдер клонує `hw-29`. Сховища немає — `SKIP_VAULT=1` і експорт нижче. Стенд спостережуваності окремий від кореневого compose: повний `--wait` там чекав би ще й Rabbit.
+
+```bash
+export SKIP_VAULT=1
+export OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:22918
+export PROMETHEUS_URL=http://127.0.0.1:22911
+export TRACE_API_URL=http://127.0.0.1:22904
+docker compose -f observability/compose.yml up -d --wait
+npm ci
+npx tsc --noEmit
+npm run demo:logs
+npm run demo:metrics
+npm run demo:trace
+```
+
+Прогін 13.11.2026, кожне демо двічі підряд з тим самим виводом:
+
+```
+non-json-lines=0
+layers=3
+distinct-trace-ids=1
+trace-id-matches-header=1
+burst=8
+burst-trace-ids=8
+burst-uneven=0
+secret-req-logged=1
+secret-in-logs=0
+
+sent-ok=40
+sent-fail=15
+counter-delta=55
+errors-delta=15
+above-top-bucket=0
+series-before=2
+series-after=2
+
+spans=2
+orphan-spans=0
+trace-matches-header=1
+trace-matches-log=1
+span-status-error=1
+```
 
 ## Auth
 
@@ -793,4 +841,32 @@ Bucket policy для AWS + OAC (у цій здачі дистрибуцію не
 `startupProbe` на `/healthz`: `periodSeconds` 1 і `failureThreshold` 20 дають 20 с до першого рестарту, поки процес не почав слухати. Після першого успіху ця проба вимикається, і далі зависання ловить вже liveness (`periodSeconds` 10, `failureThreshold` 3 — близько 30 с). Якби той самий повільний старт прикривали лише `initialDelaySeconds` у liveness, довелося б тримати велику паузу і для мертвого процесу теж: перша перевірка зависання чекала б усю цю паузу, а не 30 с.
 
 Секрет збірки — файл `.npm_token` (у git його немає), змонтований як `RUN --mount=type=secret`. Приватного npm-реєстру немає, токен — приманка. Поріг сканера рахує `scripts/scan.sh` з звіту Trivy: `SCAN_MAX=-1` дає `gate=fail`, `SCAN_MAX=99999` дає `gate=pass`. Той самий скрипт викликає крок `.github/workflows/scan.yml` з `SCAN_MAX=99999`, бо в distroless лишаються виправні CRITICAL+HIGH, а база сканера їде щодоби. Зелений образ не обіцяємо.
+
+## Observability
+
+Один ключ — `trace_id` активного спана OpenTelemetry. Pino бере його в mixin через `trace.getActiveSpan()?.spanContext().traceId`, тож жодна функція не приймає `req`, щоб дописати корелятор. `userId`, `tenant` і `idempotencyKey` живуть окремо в `AsyncLocalStorage`. Шар записується як `logger.child({ layer })`: контролер, сервіс, репозиторій. Токен з `Authorization` і пароль з тіла логіну ріже `redact` за явними шляхами `req.headers.authorization`, `password`, `body.password`.
+
+RED — лічильник `http_requests_total` і гістограма `http_request_duration_seconds` з лейблами `method`, `route`, `status`. `route` — шаблон `/orders/:id`, не сирий шлях. Бакети: `0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10` секунд. Найповільніший запит демо спить 200 мс на `id=slow`; верхня скінченна межа 10 с лишає запас, щоб `histogram_quantile` не впирався в край саме тоді, коли запит повільний.
+
+Стенд — один контейнер `grafana/otel-lgtm:0.11.11` (`observability/compose.yml`). Після двох прогонів `demo:trace` він займав 723 МіБ з 7,7 ГіБ Docker. Кластер kind із ДЗ #28 на цей час не піднятий. Grafana на цьому стенді анонімна, окремого пароля немає. Ті самі три адреси перевіряє `infra/` до будь-якого виклику кластера: порожнє значення кидає ім'я змінної.
+
+| Змінна | Джерело | Навіщо |
+|---|---|---|
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | сховище | OTLP HTTP колектора, у стенді `http://127.0.0.1:22918` |
+| `PROMETHEUS_URL` | сховище | Prometheus, у стенді `http://127.0.0.1:22911` |
+| `TRACE_API_URL` | сховище | Tempo HTTP, у стенді `http://127.0.0.1:22904` |
+
+Дашборд `observability/grafana/dashboards/red.json` підхоплює `observability/grafana/dashboard-provider.yml`, датасорси провіжаться `observability/grafana/datasources.yml`. Три панелі:
+
+| Питання | PromQL |
+|---|---|
+| Скільки запитів (Rate) | `sum by (route) (rate(http_requests_total{service="marketplace"}[1m]))` |
+| Яка частка 5xx (Errors) | `sum by (route) (rate(http_requests_total{service="marketplace",status=~"5.."}[1m])) / sum by (route) (rate(http_requests_total{service="marketplace"}[1m]))` |
+| Наскільки повільно (Duration) | `histogram_quantile(0.95, sum by (le, route) (rate(http_request_duration_seconds_bucket{service="marketplace"}[1m])))` |
+
+Вікно `[1m]`, бо демо коротке: `[5m]` на хвилинному прогоні майже нічого не покаже.
+
+SLI — частка запитів `POST /orders` і `GET /orders/:id`, що завершились швидше за 500 мс і без 5xx. SLO — 99,5 % таких запитів за 30 днів. Бюджет помилок: 0,005 × 30 діб × 24 год × 60 хв = 216 хвилин на місяць.
+
+Числа прогону — у блоці `### ДЗ#29` вище.
 

@@ -17,8 +17,12 @@ import {
 import type { Request, Response } from 'express';
 import { AuthGuard, CurrentUser } from '../auth/auth.guard.js';
 import type { AuthUser } from '../auth/auth.service.js';
+import { runWithRequest } from '../observability/context.js';
+import { layerLogger, logger } from '../observability/logger.js';
 import { OrderEventsService } from './order-events.service.js';
 import { OrdersService } from './orders.service.js';
+
+const controllerLog = layerLogger(logger, 'orders.controller');
 
 @Controller('orders')
 export class OrdersController {
@@ -72,7 +76,8 @@ export class OrdersController {
   @Get(':id')
   @UseGuards(AuthGuard)
   getById(@Param('id') id: string, @CurrentUser() user: AuthUser) {
-    return this.orders.findOwned(Number(id), user);
+    controllerLog.info({ id }, 'get order');
+    return runWithRequest({ userId: user.id }, () => this.orders.findOwned(Number(id), user));
   }
 
   @Post()
@@ -81,7 +86,8 @@ export class OrdersController {
     @Body() body: { items: number[] },
     @Headers('idempotency-key') idempotencyKey?: string,
   ) {
-    return this.orders.create(body.items, idempotencyKey);
+    controllerLog.info('create order');
+    return runWithRequest({ idempotencyKey }, () => this.orders.create(body.items, idempotencyKey));
   }
 
   @Patch(':id/status')

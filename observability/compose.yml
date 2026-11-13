@@ -1,0 +1,23 @@
+name: hw29
+
+services:
+  otel:
+    image: grafana/otel-lgtm:0.11.11
+    ports:
+      - "127.0.0.1:22912:3000"
+      - "127.0.0.1:22911:9090"
+      - "127.0.0.1:22904:3200"
+      - "127.0.0.1:22918:4318"
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
+      GF_AUTH_DISABLE_LOGIN_FORM: "true"
+    volumes:
+      - ./grafana/datasources.yml:/otel-lgtm/grafana/conf/provisioning/datasources/hw29.yml:ro
+      - ./grafana/dashboard-provider.yml:/otel-lgtm/grafana/conf/provisioning/dashboards/hw29-provider.yaml:ro
+      - ./grafana/dashboards:/otel-lgtm/grafana/conf/provisioning/dashboards/hw29:ro
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:3000/api/health"]
+      interval: 2s
+      timeout: 3s
+      retries: 40

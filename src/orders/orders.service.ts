@@ -11,12 +11,15 @@ import type { AuthUser } from '../auth/auth.service.js';
 import { getCurrentCursor, getNextCursor } from '../cursor.js';
 import { buildOrderPlaced } from '../messaging/events.js';
 import { insertOutbox } from '../messaging/outbox.js';
+import { layerLogger, logger } from '../observability/logger.js';
 import { OrderEventsService } from './order-events.service.js';
 
 type OrderRow = { id: number; total_cents: number; user_id?: number };
 type CreateOrderResult = { id: number; total_cents: number; user_id: number };
 
 const STATUSES = new Set(['pending', 'completed', 'cancelled']);
+const serviceLog = layerLogger(logger, 'orders.service');
+const repoLog = layerLogger(logger, 'orders.repo');
 
 @Injectable()
 export class OrdersService {
@@ -37,6 +40,12 @@ export class OrdersService {
   }
 
   async findById(id: number) {
+    serviceLog.info({ id }, 'load order');
+    return this.selectOrder(id);
+  }
+
+  private async selectOrder(id: number) {
+    repoLog.info({ id }, 'select order');
     const { rows } = await this.pool.query<OrderRow & { user_id: number }>(
       `SELECT o.id::int AS id,
               o.user_id::int AS user_id,
