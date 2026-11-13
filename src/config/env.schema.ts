@@ -1,7 +1,7 @@
 import z from 'zod';
 
 /**
- * JWT_* і pepper — зі сховища, без дефолтів. validate біжить на імпорті
+ * JWT_*, pepper і STORAGE_* — зі сховища, без дефолтів. validate біжить на імпорті
  * AppModule, тобто до першого зʼєднання з БД.
  */
 export const envSchema = z.object({
@@ -14,6 +14,10 @@ export const envSchema = z.object({
   JWT_PUBLIC_KEY: z.string().min(1),
   JWT_KID: z.string().min(1),
   REFRESH_TOKEN_PEPPER: z.string().min(1),
+  STORAGE_ENDPOINT: z.string().min(1),
+  STORAGE_ACCESS_KEY: z.string().min(1),
+  STORAGE_SECRET_KEY: z.string().min(1),
+  STORAGE_BUCKET: z.string().min(1),
 })
 
 export type Env = z.infer<typeof envSchema>

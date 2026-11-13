@@ -20,7 +20,8 @@ export function mountHttp(app: Express): void {
             path === '/db' ||
             /^\/orders\/[^/]+\/events$/.test(path) ||
             // raw Buffer + HMAC — OpenAPI JSON schema тут не застосовуємо
-            path.startsWith('/webhooks/'),
+            path.startsWith('/webhooks/') ||
+            path.startsWith('/uploads'),
     }));
 }
 

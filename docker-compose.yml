@@ -125,6 +125,24 @@ services:
       timeout: 3s
       retries: 30
 
+  # ДЗ#26: приватний MinIO. Офіційний minio/minio з Hub знято; цей тег ще тягнеться.
+  # Бакет і публічну policy тут не створюємо.
+  minio:
+    image: bitnamilegacy/minio:2025.7.23-debian-12-r5
+    environment:
+      MINIO_ROOT_USER: hw26user
+      MINIO_ROOT_PASSWORD: hw26secretpass
+    tmpfs:
+      - /bitnami/minio:size=1g
+    ports:
+      - "22650:9000"
+      - "22651:9001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:9000/minio/health/live"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
 volumes:
   pgdata-restore:
     name: marketplace-pgdata-restore
