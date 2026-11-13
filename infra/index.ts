@@ -13,6 +13,9 @@ const required = [
   "STORAGE_ACCESS_KEY",
   "STORAGE_SECRET_KEY",
   "STORAGE_BUCKET",
+  "OTEL_EXPORTER_OTLP_ENDPOINT",
+  "PROMETHEUS_URL",
+  "TRACE_API_URL",
 ] as const;
 
 for (const name of required) {
