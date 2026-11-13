@@ -1,0 +1,3 @@
+config:
+  kubernetes:context: kind-hw28
+encryptionsalt: v1:2c4UiYIWijQ=:v1:JXWjEJf/zLiorItQ:UOIl0BUgd34229H4ZvcaP+9FUFOtjw==

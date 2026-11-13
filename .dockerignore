@@ -3,3 +3,6 @@ secrets/
 node_modules/
 .git
 dist
+.npm_token
+.pulumi
+infra/node_modules
