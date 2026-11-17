@@ -1,0 +1,40 @@
+{
+  "title": "Marketplace RED",
+  "uid": "marketplace-red",
+  "schemaVersion": 39,
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "Rate: how many requests",
+      "targets": [
+        {
+          "expr": "sum by (route) (rate(http_requests_total{service=\"marketplace\"}[1m]))",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "Errors: share of 5xx",
+      "targets": [
+        {
+          "expr": "sum by (route) (rate(http_requests_total{service=\"marketplace\",status=~\"5..\"}[1m])) / sum by (route) (rate(http_requests_total{service=\"marketplace\"}[1m]))",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Duration: p95",
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum by (le, route) (rate(http_request_duration_seconds_bucket{service=\"marketplace\"}[1m])))",
+          "refId": "A"
+        }
+      ]
+    }
+  ]
+}

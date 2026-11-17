@@ -1,3 +1,4 @@
+import './observability/otel.js';
 import 'reflect-metadata';
 import { pathToFileURL } from 'node:url';
 import express, { type ErrorRequestHandler, type Express } from 'express';
@@ -6,8 +7,11 @@ import { NestFactory } from '@nestjs/core';
 import { ConfigService } from '@nestjs/config';
 import { ExpressAdapter } from '@nestjs/platform-express';
 import { type Env } from './config/env.schema.js';
+import { ObserveExceptionFilter } from './observability/exception-filter.js';
+import { observeHttp } from './observability/http.js';
 
 export function mountHttp(app: Express): void {
+    observeHttp(app);
     // HMAC вебхука рахується над СИРИМИ байтами — до JSON.parse.
     app.use('/webhooks', express.raw({ type: '*/*', limit: '1mb' }));
     app.use(express.json());
@@ -17,6 +21,7 @@ export function mountHttp(app: Express): void {
         validateResponses: true,
         ignorePaths: (path: string) =>
             path === '/health' ||
+            path === '/metrics' ||
             path === '/db' ||
             /^\/orders\/[^/]+\/events$/.test(path) ||
             // raw Buffer + HMAC — OpenAPI JSON schema тут не застосовуємо
@@ -46,9 +51,12 @@ export async function createHttpApp(): Promise<{
     );
     const config = nestApp.get(ConfigService<Env, true>);
 
+    nestApp.useGlobalFilters(new ObserveExceptionFilter(nestApp.getHttpAdapter()));
+
     const problemHandler: ErrorRequestHandler = (error, req, res, _next) => {
         const status = (error as { status?: number }).status ?? 500;
         const detail = error instanceof Error ? error.message : 'Unexpected error';
+        res.locals.errorDetail = detail;
         res.status(status).type('application/problem+json').json({
             type: `https://api.marketplace.example/problems/${status}`,
             title: 'Error',
