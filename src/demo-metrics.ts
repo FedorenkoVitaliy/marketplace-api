@@ -1,7 +1,7 @@
 import './observability/otel.js';
 import { request as httpRequest } from 'node:http';
 import { createOrdersServer, makeLogSink } from './observability/orders-http.js';
-import { metricsRegistry, parseMetrics, sumMetric } from './observability/metrics.js';
+import { parseMetrics, sumMetric } from './observability/metrics.js';
 
 const port = 22921;
 
@@ -16,8 +16,16 @@ function call(path: string): Promise<number> {
   });
 }
 
-async function scrape(): Promise<string> {
-  return metricsRegistry.metrics();
+function scrape(): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const req = httpRequest({ hostname: '127.0.0.1', port, path: '/metrics', method: 'GET' }, (res) => {
+      const chunks: Buffer[] = [];
+      res.on('data', (chunk: Buffer) => chunks.push(chunk));
+      res.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')));
+    });
+    req.on('error', reject);
+    req.end();
+  });
 }
 
 function counterSeries(text: string): number {

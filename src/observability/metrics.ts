@@ -20,9 +20,17 @@ export const httpDuration = new Histogram({
   registers: [metricsRegistry],
 });
 
-export function routeTemplate(path: string): string {
-  if (/^\/orders\/[^/]+$/.test(path)) return '/orders/:id';
-  return path;
+type RoutedRequest = {
+  baseUrl?: string;
+  route?: { path?: string | string[] };
+};
+
+export function routeFromRequest(req: RoutedRequest): string {
+  const raw = req.route?.path;
+  const path = Array.isArray(raw) ? raw[0] : raw;
+  if (!path) return 'unmatched';
+  if (path.startsWith('/')) return path;
+  return `${req.baseUrl ?? ''}/${path}`.replace(/\/{2,}/g, '/');
 }
 
 export type MetricLine = { name: string; labels: string; value: number };

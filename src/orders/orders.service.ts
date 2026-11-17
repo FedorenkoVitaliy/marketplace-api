@@ -1,7 +1,9 @@
+import { SpanStatusCode, trace } from '@opentelemetry/api';
 import {
   BadRequestException,
   ConflictException,
   ForbiddenException,
+  HttpException,
   Inject,
   Injectable,
   NotFoundException,
@@ -20,6 +22,7 @@ type CreateOrderResult = { id: number; total_cents: number; user_id: number };
 const STATUSES = new Set(['pending', 'completed', 'cancelled']);
 const serviceLog = layerLogger(logger, 'orders.service');
 const repoLog = layerLogger(logger, 'orders.repo');
+const tracer = trace.getTracer('marketplace-api');
 
 @Injectable()
 export class OrdersService {
@@ -45,6 +48,25 @@ export class OrdersService {
   }
 
   private async selectOrder(id: number) {
+    return tracer.startActiveSpan('db.query', async (span) => {
+      try {
+        return await this.queryOrder(id);
+      } catch (error) {
+        const status = error instanceof HttpException ? error.getStatus() : 500;
+        if (status >= 500) {
+          span.setStatus({
+            code: SpanStatusCode.ERROR,
+            message: error instanceof Error ? error.message : 'error',
+          });
+        }
+        throw error;
+      } finally {
+        span.end();
+      }
+    });
+  }
+
+  private async queryOrder(id: number) {
     repoLog.info({ id }, 'select order');
     const { rows } = await this.pool.query<OrderRow & { user_id: number }>(
       `SELECT o.id::int AS id,

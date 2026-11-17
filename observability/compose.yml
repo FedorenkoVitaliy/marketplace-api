@@ -12,7 +12,10 @@ services:
       GF_AUTH_ANONYMOUS_ENABLED: "true"
       GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
       GF_AUTH_DISABLE_LOGIN_FORM: "true"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
+      - ./prometheus.yaml:/otel-lgtm/prometheus.yaml:ro
       - ./grafana/datasources.yml:/otel-lgtm/grafana/conf/provisioning/datasources/hw29.yml:ro
       - ./grafana/dashboard-provider.yml:/otel-lgtm/grafana/conf/provisioning/dashboards/hw29-provider.yaml:ro
       - ./grafana/dashboards:/otel-lgtm/grafana/conf/provisioning/dashboards/hw29:ro
