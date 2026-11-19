@@ -8,15 +8,18 @@ curl -fsS "$EP/_localstack/health" >/dev/null
 dir="$ROOT/infra/base"
 pulumi stack select base --create --non-interactive --cwd "$dir"
 pulumi cancel --yes --stack base --cwd "$dir" || true
-# Community-образ відповідає 501 на aws:budgets, тож цей up його не шле. Ресурс лишається в стеку.
-pulumi up --yes --non-interactive --stack base --cwd "$dir" \
-  --exclude 'urn:pulumi:base::hw31-base::aws:budgets/budget:Budget::hw31-budget'
+# Community-образ відповідає 501 на budgets. Решта стеку створюється попри цю помилку.
+set +e
+pulumi up --yes --non-interactive --refresh --continue-on-error --stack base --cwd "$dir"
+code=$?
+set -e
+pulumi stack output vpcId --stack base --cwd "$dir" >/dev/null
 pulumi stack export --stack base --cwd "$dir" > "$ROOT/evidence/base-state.json"
 
 vpc_out="$(pulumi stack output vpcId --stack base --cwd "$dir")"
 public_ids="$(pulumi stack output publicSubnetIds --json --stack base --cwd "$dir")"
 private_ids="$(pulumi stack output privateSubnetIds --json --stack base --cwd "$dir")"
-vpc="$(aws_local ec2 describe-vpcs --vpc-ids "$vpc_out" --query 'Vpcs[0].VpcId' --output text)"
+vpc="$(aws_local ec2 describe-vpcs --vpc-ids "$vpc_out" --query 'Vpcs[0].VpcId' --output text)" || exit 1
 subs="$(aws_local ec2 describe-subnets --filters "Name=vpc-id,Values=${vpc}")"
 rts="$(aws_local ec2 describe-route-tables --filters "Name=vpc-id,Values=${vpc}")"
 sgs="$(aws_local ec2 describe-security-groups --filters "Name=vpc-id,Values=${vpc}" --query 'length(SecurityGroups)' --output text)"

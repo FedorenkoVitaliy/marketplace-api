@@ -1,0 +1,3 @@
+sim-allowed=allowed
+sim-denied=implicitDeny
+sim-source=policy-document
