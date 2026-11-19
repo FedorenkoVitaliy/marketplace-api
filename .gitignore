@@ -12,4 +12,7 @@ pacts/
 .state/
 .npm_token
 .pulumi/
+.pulumi-hw31/
 infra/node_modules/
+infra/base/node_modules/
+infra/demo/node_modules/
