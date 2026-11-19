@@ -252,6 +252,107 @@ SKIP LOCKED 322 мс · w1=3 w2=3 w3=3 w4=3 · оброблено двічі: 0
 
 У DataSource `synchronize: false`. Схему ставить лише `migration:run`.
 
+### ДЗ#31
+
+Смуга запасна. D2, D3 і D4 на цій смузі не оцінюються. Ключів живого виміру в `evidence/demos.txt` немає навмисно: немає `az-before`, `az-after`, `failover-seconds`, `event`, `alb-dns`, `http-code`, `target-state`, `nat-minutes`, `nat-billed-hours`. Доказ знесення на цій смузі — локальний рядок `state-resources-left=0`. Посилання на прогін teardown не ставиться, G2 тут не доказ.
+
+```bash
+REPO=FedorenkoVitaliy/marketplace-api
+
+# A1
+for d in infra/base infra/demo; do
+  ( cd "$d" && npm ci >/dev/null 2>&1 && npx tsc --noEmit ); echo "$d exit=$?"
+done
+
+# A2
+grep -qE '^vpc-id=vpc-[0-9a-f]+$' evidence/base.txt && echo "vpc-id OK"
+for k in public-subnets=2 private-subnets=2 subnet-azs=2 private-default-route=0; do
+  grep -qx "$k" evidence/base.txt && echo "$k OK" || echo "НЕМАЄ: $k"
+done
+awk -F= '/^security-groups=/{print ($2>=2) ? "security-groups OK ("$2")" : "SG мало: "$2}' evidence/base.txt
+
+# A3
+awk -F= '/^tagged-resources=/{print ($2>=8) ? "теги OK ("$2")" : "теги: "$2}' evidence/base.txt
+jq -r '[.deployment.resources[]? | select(.type=="aws:ec2/subnet:Subnet") | .outputs.availabilityZone] | map(select(. != null)) | unique | length' evidence/base-state.json
+
+# A4
+jq '[.deployment.resources[]?.type | select(test("aws:rds/|aws:lb/|aws:ec2/natGateway|aws:ec2/instance:|aws:ec2/eip:|aws:elasticache/"))] | length' evidence/base-state.json
+
+# B1
+grep -c 'token.actions.githubusercontent.com' evidence/iam.json
+grep -c 'sts.amazonaws.com' evidence/iam.json
+grep -c "${REPO##*/}" evidence/iam.json
+jq -r '[.. | objects | .Action? // empty] | flatten | map(select(. == "*")) | length' evidence/iam.json
+
+# B2
+grep -qx 'sim-allowed=allowed' evidence/iam.txt && echo "позитив OK"
+grep -qE '^sim-denied=(implicitDeny|explicitDeny)$' evidence/iam.txt && echo "негатив OK"
+
+# B3
+git ls-files -z | xargs -0 grep -lE 'AKIA[0-9A-Z]{16}|ASIA[0-9A-Z]{16}|aws_secret_access_key *='
+grep -rlE 'AWS_SECRET_ACCESS_KEY|aws-secret-access-key' .github/workflows/
+grep -cE 'id-token: *write' .github/workflows/teardown.yml
+PKG=$(git ls-files 'package.json' '*/package.json' | grep -v node_modules | head -1)
+echo "package.json: ${PKG:-НЕМАЄ}"
+node -e "const s=require(require('path').resolve(process.argv[1])).scripts||{};const need=['up:base','up:demo','destroy:demo','destroy:base','demo:failover','demo:nat','demo:alb'];const bad=need.filter(k=>!/with-secrets\.sh/.test(s[k]||''));console.log(bad.length?('без обгортки: '+bad.join(', ')):'OK')" "$PKG"
+
+# C1
+B=$(git ls-files | xargs grep -lE 'budgets\.Budget' 2>/dev/null | head -1)
+D=$(git ls-files | xargs grep -lE 'rds\.Instance|lb\.LoadBalancer' 2>/dev/null | head -1)
+tb=$(git log --diff-filter=A --format=%ct -- "$B" | tail -1)
+td=$(git log --diff-filter=A --format=%ct -- "$D" | tail -1)
+echo "budget=$B($tb) paid=$D($td)"
+[ -n "$tb" ] && [ -n "$td" ] && [ "$tb" -le "$td" ] && echo "порядок OK" || echo "ПРОВАЛ"
+
+# C2
+B=$(git ls-files | xargs grep -lE 'budgets\.Budget' 2>/dev/null | head -1)
+grep -c 'ACTUAL' "$B"
+grep -c 'FORECASTED' "$B"
+grep -cE '(limitAmount|limit_amount)[^0-9]+5([^0-9]|$)' "$B"
+
+# C3
+grep -cE '^ *schedule:' .github/workflows/teardown.yml
+grep -cE '^ *workflow_dispatch:' .github/workflows/teardown.yml
+grep -cE 'pulumi +destroy' .github/workflows/teardown.yml
+
+# D1
+RF=$(git ls-files | xargs grep -lE 'rds\.Instance' 2>/dev/null | head -1)
+grep -cE 'multiAz: *true' "$RF"
+grep -cE 'db\.t4g\.micro|db\.t3\.micro' "$RF"
+grep -cE 'storageEncrypted: *true' "$RF"
+git grep -lE 'skipFinalSnapshot|registerResourceTransform' -- '*.ts' | wc -l
+```
+
+Запасна смуга. A — як на основній. B — по документу політики, не по симулятору: абзац вище і `evidence/localstack-iam.txt`. C — бюджет у коді; знесення = `pulumi destroy` і локальний `state-resources-left=0`; `file://` можна. D2–D4 не оцінюються. Код усе одно обовʼязковий: інстанс RDS (Multi-AZ instance), балансувальник з target group, `evidence/preview-demo.txt`, `evidence/501.txt`, абзац порівняння зі стеком #15.
+
+```bash
+grep -ciE '^ *смуга: *запасна' README.md
+grep -c 'not included within your LocalStack license' evidence/501.txt
+grep -cE 'aws:rds/instance:Instance' evidence/preview-demo.txt
+for k in deny-all=200 fake-key=200 enforce-iam-log-lines=0; do
+  grep -qx "$k" evidence/localstack-iam.txt && echo "$k OK" || echo "НЕМАЄ: $k"
+done
+grep -qx 'state-resources-left=0' evidence/demos.txt && echo "знесено OK"
+```
+
+Шість команд порожнечі, які джоба основної смуги друкує в лог. На цій смузі доказом є локальний рядок, не цей лог.
+
+```bash
+pulumi stack export | jq '[.deployment.resources[]|select(.type|startswith("aws:"))]|length'
+
+aws resourcegroupstaggingapi get-resources --region "$R" \
+  --tag-filters Key=Project,Values=nodejs-pro-hw31 --query 'length(ResourceTagMappingList)'
+
+aws rds describe-db-instances --region "$R" --query 'length(DBInstances)'
+
+aws elbv2 describe-load-balancers --region "$R" --query 'length(LoadBalancers)'
+
+aws ec2 describe-nat-gateways --region "$R" --filter Name=state,Values=available \
+                                  --query 'length(NatGateways)'
+
+aws ec2 describe-addresses   --region "$R" --query 'length(Addresses)'
+```
+
 ### ДЗ#15
 
 Грейдер клонує гілку `hw-15`. Сховища немає: `SKIP_VAULT=1` і дев-креденшели з compose. `DATABASE_URL` дивиться на PgBouncer (`6432`), не на прямий Postgres.
@@ -869,4 +970,99 @@ RED — лічильник `http_requests_total` і гістограма `http_r
 SLI — частка запитів `POST /orders` і `GET /orders/:id`, що завершились швидше за 500 мс і без 5xx. SLO — 99,5 % таких запитів за 30 днів. Бюджет помилок: 0,005 × 30 діб × 24 год × 60 хв = 216 хвилин на місяць.
 
 Числа прогону — у блоці `### ДЗ#29` вище.
+
+## AWS
+смуга: запасна (LocalStack)
+
+pinning to a prior version will opt you out of any future updates or security patches.
+
+Програми Pulumi: `infra/base` (бюджет, мережа, роль знесення; погодинних ресурсів немає) і `infra/demo` (інстанс RDS, балансувальник, ціль; NAT лише за прапорцем). Файл, який бере B3, — `infra/base/package.json`: `git ls-files 'package.json' '*/package.json'` віддає його першим, не кореневий `package.json`. Регіон обох стеків — `eu-central-1` (`aws:region` у `infra/base/Pulumi.base.yaml` і `infra/demo/Pulumi.demo.yaml`). Образ `localstack/localstack:4.14.0`, порт `23166`. Рядка `teardown-run` немає: на цій смузі G1 і G2 не є доказом здачі.
+
+### Ставка
+
+Дата знімка в ТЗ — 24.08.2026. Курс НБУ в ТЗ — 44,7064 грн/$ на 25.08.2026. Місяць — 730 год. Рядки нижче взяті з того знімка в тексті завдання.
+
+| Рядок | Ставка | За 730 год |
+|---|---|---:|
+| ALB | $0,027/год | $19,71 |
+| RDS Multi-AZ instance | $0,037/год | $27,01 |
+| gp3 20 ГіБ | $0,274/ГіБ-міс × 20 | $5,48 |
+| Public IPv4 × 2 під балансувальником | $0,005/год × 2 | $7,30 |
+| LCU (оцінка навчального навантаження) | | $0,29 |
+| **Разом** | **$0,08191/год** | **$59,79** |
+
+$59,79 за 730 год = $0,08191/год.
+
+### Дозволи teardown
+
+Кожен рядок — один `Action` із `teardownPolicy` у `infra/base/stack.ts`. У кожному statement `Resource` — `"*"`, бо ARN ресурсів `demo` ще невідомі, коли створюється `base`. В `Action` зірочки немає.
+
+- `rds:DeleteDBInstance` — знести інстанс RDS.
+- `rds:DescribeDBInstances` — прочитати інстанс перед знесенням.
+- `rds:DeleteDBSubnetGroup` — знести групу підмереж бази.
+- `rds:DescribeDBSubnetGroups` — прочитати цю групу.
+- `rds:ListTagsForResource` — теги ресурсу RDS.
+- `elasticloadbalancing:DeleteLoadBalancer` — знести балансувальник.
+- `elasticloadbalancing:DeleteListener` — знести його слухач.
+- `elasticloadbalancing:DeleteTargetGroup` — знести target group.
+- `elasticloadbalancing:DeregisterTargets` — зняти цілі перед видаленням групи.
+- `elasticloadbalancing:DescribeLoadBalancers` — прочитати балансувальник.
+- `elasticloadbalancing:DescribeListeners` — прочитати слухачі.
+- `elasticloadbalancing:DescribeTargetGroups` — прочитати target group.
+- `elasticloadbalancing:DescribeTargetHealth` — стан цілей.
+- `elasticloadbalancing:DescribeLoadBalancerAttributes` — атрибути балансувальника.
+- `elasticloadbalancing:DescribeTargetGroupAttributes` — атрибути групи.
+- `elasticloadbalancing:DescribeTags` — теги балансувальника і групи.
+- `ec2:DeleteNatGateway` — знести NAT, якщо прапорець `hw31:withNat` його підняв.
+- `ec2:DescribeNatGateways` — прочитати NAT.
+- `ec2:ReleaseAddress` — відпустити адресу NAT.
+- `ec2:DisassociateAddress` — відвʼязати адресу перед release.
+- `ec2:DescribeAddresses` — прочитати адреси, включно з хвостом EIP.
+- `lambda:DeleteFunction` — знести функцію-ціль балансувальника.
+- `lambda:GetFunction` — прочитати функцію.
+- `lambda:RemovePermission` — зняти дозвіл виклику з балансувальника.
+- `lambda:GetPolicy` — прочитати політику функції.
+- `iam:DeleteRole` — знести роль цілі.
+- `iam:GetRole` — прочитати роль.
+- `iam:DetachRolePolicy` — відчепити керовану політику логів.
+- `iam:ListAttachedRolePolicies` — побачити причеплені політики.
+- `iam:ListRolePolicies` — побачити inline-політики.
+- `iam:DeleteRolePolicy` — знести inline-політику, якщо вона є.
+- `iam:ListInstanceProfilesForRole` — перевірити, що роль не в instance profile, інакше `DeleteRole` не проходить.
+- `tag:GetResources` — підрахунок ресурсів з тегом `Project=nodejs-pro-hw31`.
+- `sts:GetCallerIdentity` — хто викликає знесення.
+
+`sim-allowed` і `sim-denied` у `evidence/iam.txt` пише скрипт, який читає документ цієї політики. Це не вивід `aws iam simulate-principal-policy`. Позитив: у якомусь `Allow` є `rds:DeleteDBInstance`, рядок `sim-allowed=allowed`. Негатив: `s3:DeleteBucket` немає в жодному `Action` і немає `Action` `"*"`, рядок `sim-denied=implicitDeny`. Поруч скрипт ставить `sim-source=policy-document`.
+
+LocalStack цю політику не застосовує. Я не перевіряв її локально, бо перевірити локально неможливо.
+
+Транскрипт емулятора лягає в `evidence/localstack-iam.txt`. Це інший файл, ніж `evidence/iam.txt`.
+
+### RDS Multi-AZ проти стека з #15
+
+Сервіс `db` у `docker-compose.yml` — `postgres:16-alpine`, порт `5432`, `max_connections=20`. Окремої streaming-replica в compose немає. Сервіс `pgbouncer` — `edoburu/pgbouncer:v1.24.1-p1`, хост-порт `6432`, конфіг `pgbouncer/pgbouncer.ini` (`pool_mode = transaction`, `marketplace = host=db port=5432 dbname=marketplace`). Застосунок ходить у `127.0.0.1:6432` (`DB_URL` у `.env.example`). `scripts/backup.sh` знімає `pg_dump -Fc` у `backups/marketplace-YYYY-MM-DD-HHMMSS.dump`. Розклад `backup.cron` — 03:00. `scripts/restore-drill.sh` піднімає контейнер `restore` (профіль `drill`, порт `5433`) і друкує `MATCH`. Числа drill — у `RESTORE-DRILL.md`.
+
+RDS забирає фейловер інстанса і сховище standby. Лишає пул зʼєднань PgBouncer, логічний бекап `backup.sh` і перевірку `restore-drill.sh`. Репліку для читання теж лишає: standby не читається. Відповідь не «усе».
+
+### KMS
+
+KMS тут — шар під `ENCRYPTION_KEY`, не заміна сховищу #11. Секрети як і раніше їдуть через `scripts/with-secrets.sh`. Власний customer-managed key не створювали. `storageEncrypted: true` лишає ключ AWS `aws/rds`.
+
+### Бекенд стану
+
+ДЗ #28 тримає стан у `file://${ROOT}/.pulumi` через `scripts/pulumi.sh` (програма `infra/index.ts`, `infra/Pulumi.yaml`, стек `hw28`). На основній смузі так не можна: воркер GitHub не бачить ноутбук. На запасній `file://` можна, бо білити нічого. Джоба тримає свій `file://` на диску раннера (`PULUMI_BACKEND_URL` = `file://` у `runner.temp`).
+
+Якщо Free plan недоступний, бюджет і destroy — єдиний захист. На цій здачі запасна смуга, бо живими грошима не платимо і чужий SSO не чіпаємо.
+
+### Бонус
+
+Два NAT, по одному на зону, в орієнтирі ТЗ дають $142,72 на місяць. З них NAT разом зі своїми Public IPv4 — близько 58% (у ТЗ 58,3%, $82). На схемі цього рядка немає. У нашому `demo` NAT лише за прапорцем і в ставку $59,79 не входить.
+
+`eu-north-1` проти `eu-central-1` за тим самим орієнтиром ТЗ: Стокгольм дешевший на 9,8%, нерівномірно. NAT −11,5%, ALB −11,3%, RDS −11%, Public IPv4 і егрес однакові. Різниця в погодинних ставках NAT, балансувальника і бази. Плоский відсоток на наш стек без NAT не переноситься. Регіон здачі — `eu-central-1`.
+
+S3 gateway endpoint не бере погодинну плату і не бере плату за обробку даних. Він замінює NAT, коли з приватної підмережі потрібен лише трафік S3. Решту інтернету він не виводить: образи, API і будь-який не-S3 трафік як і раніше йдуть через NAT. У цьому стеку в приватній підмережі лише база, їй інтернет не потрібен. Обіцянка #26 (приватний бакет) закривається випадком «лише S3».
+
+Бюджет — лист, не гальмо. Дані оновлюються з лагом 8–12 год. За 12 год стек намотує $0,08191 × 12 = $0,98. BudgetAction спіймала б поріг із тим самим лагом і могла б зупинити інстанс RDS. Ресурс BudgetAction не створювали. Зупиняють тип акаунта і destroy.
+
+Емулятор кроку 7.4 ДЗ #26 — nginx: бреше в бік дозволу, як LocalStack. Прибрати `stale-while-revalidate` з `Cache-Control` недостатньо: `STALE` дає `proxy_cache_use_stale`.
 
