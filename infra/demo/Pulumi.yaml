@@ -1,0 +1,6 @@
+name: hw31-demo
+runtime:
+  name: nodejs
+  options:
+    typescript: true
+description: HW31 demo stack. Multi-AZ Postgres, application load balancer, NAT only behind a flag.
