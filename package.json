@@ -58,7 +58,14 @@
     "demo:logs": "npm run build && bash scripts/with-secrets.sh dev node dist/src/demo-logs.js",
     "demo:metrics": "npm run build && bash scripts/with-secrets.sh dev node dist/src/demo-metrics.js",
     "demo:trace": "npm run build && bash scripts/with-secrets.sh dev node dist/src/demo-trace.js",
-    "outbox:relay": "npm run build && bash scripts/with-secrets.sh dev node dist/src/messaging/outbox-relay-child.js"
+    "outbox:relay": "npm run build && bash scripts/with-secrets.sh dev node dist/src/messaging/outbox-relay-child.js",
+    "up:base": "bash scripts/with-secrets.sh dev bash scripts/hw31-up-base.sh",
+    "up:demo": "bash scripts/with-secrets.sh dev bash scripts/hw31-up-demo.sh",
+    "destroy:demo": "bash scripts/with-secrets.sh dev bash scripts/hw31-destroy-demo.sh",
+    "destroy:base": "bash scripts/with-secrets.sh dev bash scripts/hw31-destroy-base.sh",
+    "demo:failover": "bash scripts/with-secrets.sh dev bash scripts/hw31-demo-failover.sh",
+    "demo:nat": "bash scripts/with-secrets.sh dev bash scripts/hw31-demo-nat.sh",
+    "demo:alb": "bash scripts/with-secrets.sh dev bash scripts/hw31-demo-alb.sh"
   },
   "engines": {
     "node": ">=22"
