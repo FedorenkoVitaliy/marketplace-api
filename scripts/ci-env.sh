@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 export SKIP_VAULT=1
-export PULUMI_CONFIG_PASSPHRASE=hw32-ci
+export PULUMI_CONFIG_PASSPHRASE=hw28-grading
 export PULUMI_BACKEND_URL="file://${PWD}/.pulumi"
+mkdir -p "${PULUMI_BACKEND_URL#file://}"
 export APP_DB_PASSWORD=grader-secret
 export PACT_BROKER_URL=http://127.0.0.1:21620
 export PACT_BROKER_TOKEN=grader-pact-token
