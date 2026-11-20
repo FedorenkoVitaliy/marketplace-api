@@ -96,7 +96,7 @@ jobs:
           }
 
           R="$AWS_REGION"
-          state=$(jq '[.deployment.resources[]|select(.type|startswith("aws:"))]|length' "$RUNNER_TEMP/demo.json")
+          state=$(jq '[.deployment.resources // [] | .[] | select(.type|startswith("aws:"))] | length' "$RUNNER_TEMP/demo.json")
           tagged=$(( $(count resourcegroupstaggingapi get-resources --endpoint-url "$EP" --region "$R" --tag-filters Key=Project,Values=nodejs-pro-hw31 --query 'length(ResourceTagMappingList)') + $(count resourcegroupstaggingapi get-resources --endpoint-url "$EP" --region us-east-1 --tag-filters Key=Project,Values=nodejs-pro-hw31 --query 'length(ResourceTagMappingList)') ))
           rds=$(count rds describe-db-instances --endpoint-url "$EP" --region "$R" --query 'length(DBInstances)')
           alb=$(count elbv2 describe-load-balancers --endpoint-url "$EP" --region "$R" --query 'length(LoadBalancers)')
