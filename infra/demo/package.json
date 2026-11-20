@@ -1,0 +1,13 @@
+{
+  "name": "hw31-demo",
+  "private": true,
+  "description": "Pulumi stack demo: Multi-AZ Postgres, application load balancer, optional NAT",
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "^6.0.3"
+  },
+  "dependencies": {
+    "@pulumi/aws": "^6.66.0",
+    "@pulumi/pulumi": "^3.144.0"
+  }
+}

@@ -1,0 +1,6 @@
+name: hw31-base
+runtime:
+  name: nodejs
+  options:
+    typescript: true
+description: HW31 base stack. Budget, VPC, security groups, GitHub OIDC. $0/hour.

@@ -1,0 +1,13 @@
+{
+  "name": "marketplace-k8s",
+  "private": true,
+  "description": "Pulumi program for the marketplace cluster",
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "^6.0.3"
+  },
+  "dependencies": {
+    "@pulumi/kubernetes": "^4.33.0",
+    "@pulumi/pulumi": "^3.144.0"
+  }
+}

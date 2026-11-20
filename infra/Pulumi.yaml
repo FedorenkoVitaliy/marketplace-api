@@ -1,0 +1,6 @@
+name: marketplace
+runtime:
+  name: nodejs
+  options:
+    typescript: true
+description: Marketplace API on a local kind cluster.
