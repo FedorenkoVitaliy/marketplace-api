@@ -21,6 +21,8 @@ export function mountHttp(app: Express): void {
         validateResponses: true,
         ignorePaths: (path: string) =>
             path === '/health' ||
+            path === '/healthz' ||
+            path === '/readyz' ||
             path === '/metrics' ||
             path === '/db' ||
             /^\/orders\/[^/]+\/events$/.test(path) ||

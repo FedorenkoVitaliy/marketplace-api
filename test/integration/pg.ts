@@ -12,6 +12,7 @@ import { AddJobs1790116349422 } from '../../src/migrations/1790116349422-AddJobs
 import { AddUserBalance1790407200000 } from '../../src/migrations/1790407200000-AddUserBalance.js';
 import { AddProcessedMessages1790500000000 } from '../../src/migrations/1790500000000-AddProcessedMessages.js';
 import { AddOutboxAndPayments1790600000000 } from '../../src/migrations/1790600000000-AddOutboxAndPayments.js';
+import { AddAuth1790700000000 } from '../../src/migrations/1790700000000-AddAuth.js';
 
 /** Усі міграції застосунку. Нову — додай сюди, інакше Pact/e2e впаде на missing relation. */
 const MIGRATIONS = [
@@ -21,6 +22,7 @@ const MIGRATIONS = [
   AddUserBalance1790407200000,
   AddProcessedMessages1790500000000,
   AddOutboxAndPayments1790600000000,
+  AddAuth1790700000000,
 ];
 
 const REQUIRED_TABLES = [
