@@ -254,7 +254,7 @@ SKIP LOCKED 322 мс · w1=3 w2=3 w3=3 w4=3 · оброблено двічі: 0
 
 ### ДЗ#31
 
-Смуга запасна. D2, D3 і D4 на цій смузі не оцінюються. Ключів живого виміру в `evidence/demos.txt` немає навмисно: немає `az-before`, `az-after`, `failover-seconds`, `event`, `alb-dns`, `http-code`, `target-state`, `nat-minutes`, `nat-billed-hours`. Доказ знесення на цій смузі — локальний рядок `state-resources-left=0`. Посилання на прогін teardown не ставиться, G2 тут не доказ.
+Смуга запасна. D2, D3 і D4 на цій смузі не оцінюються. Ключів живого виміру в `evidence/demos.txt` немає навмисно: немає `az-before`, `az-after`, `failover-seconds`, `event`, `alb-dns`, `http-code`, `target-state`, `nat-minutes`, `nat-billed-hours`. Доказ знесення — прогін teardown у GitHub Actions, у логу якого шість ключів дорівнюють нулю. Локальний рядок `state-resources-left=0` лишається поруч.
 
 ```bash
 REPO=FedorenkoVitaliy/marketplace-api
@@ -973,10 +973,11 @@ SLI — частка запитів `POST /orders` і `GET /orders/:id`, що з
 
 ## AWS
 смуга: запасна (LocalStack)
+teardown-run: https://github.com/FedorenkoVitaliy/marketplace-api/actions/runs/44657276964
 
 pinning to a prior version will opt you out of any future updates or security patches.
 
-Програми Pulumi: `infra/base` (бюджет, мережа, роль знесення; погодинних ресурсів немає) і `infra/demo` (інстанс RDS, балансувальник, ціль; NAT лише за прапорцем). Файл, який бере B3, — `infra/base/package.json`: `git ls-files 'package.json' '*/package.json'` віддає його першим, не кореневий `package.json`. Регіон обох стеків — `eu-central-1` (`aws:region` у `infra/base/Pulumi.base.yaml` і `infra/demo/Pulumi.demo.yaml`). Образ `localstack/localstack:4.14.0`, порт `23166`. Рядка `teardown-run` немає: на цій смузі G1 і G2 не є доказом здачі.
+Програми Pulumi: `infra/base` (бюджет, мережа, роль знесення; погодинних ресурсів немає) і `infra/demo` (інстанс RDS, балансувальник, ціль; NAT лише за прапорцем). Файл, який бере B3, — `infra/base/package.json`: `git ls-files 'package.json' '*/package.json'` віддає його першим, не кореневий `package.json`. Регіон обох стеків — `eu-central-1` (`aws:region` у `infra/base/Pulumi.base.yaml` і `infra/demo/Pulumi.demo.yaml`). Образ `localstack/localstack:4.14.0`, порт `23166`. Прогін знесення — рядок `teardown-run` вище. У його логу `state-resources-left`, `tagged-resources-left`, `rds-left`, `alb-left`, `nat-left` і `eip-left` дорівнюють нулю. Регіон перевірок — `eu-central-1` і `us-east-1`.
 
 ### Ставка
 
