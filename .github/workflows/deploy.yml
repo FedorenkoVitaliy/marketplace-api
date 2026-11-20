@@ -1,0 +1,60 @@
+name: deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      digest:
+        description: sha256 digest already built on the pull request
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  promote:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+      packages: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm ci --prefix infra
+      - name: tools
+        run: |
+          curl -fsSL https://get.pulumi.com | sh -s -- --version 3.277.0
+          echo "$HOME/.pulumi/bin" >> "$GITHUB_PATH"
+      - name: oidc
+        run: |
+          mkdir -p "$RUNNER_TEMP/oidc"
+          trap 'rm -f "$RUNNER_TEMP/oidc/token"' EXIT
+          curl -sS \
+            -H "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
+            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=sts.amazonaws.com" \
+            | node -e 'const fs=require("fs"); let s=""; process.stdin.on("data",d=>s+=d).on("end",()=>{const v=JSON.parse(s).value; fs.writeFileSync(process.argv[1], v, {mode:0o600});})' \
+              "$RUNNER_TEMP/oidc/token"
+          node scripts/oidc-gate.mjs \
+            --token-file "$RUNNER_TEMP/oidc/token" \
+            --jwks-url https://token.actions.githubusercontent.com/.well-known/jwks \
+            --iss https://token.actions.githubusercontent.com \
+            --policy oidc/policy.json \
+            --issuer-host token.actions.githubusercontent.com
+          rm -f "$RUNNER_TEMP/oidc/token"
+      - name: promote dispatch
+        if: github.event_name == 'workflow_dispatch'
+        run: bash scripts/ci-promote.sh "${{ inputs.digest }}"
+      - name: promote push
+        if: github.event_name == 'push'
+        run: bash scripts/ci-promote.sh

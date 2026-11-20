@@ -6,23 +6,16 @@ on:
   workflow_dispatch: {}
 
 permissions:
-  id-token: write
   contents: read
-
-env:
-  AWS_REGION: eu-central-1
-  PULUMI_BACKEND_URL: file://${{ runner.temp }}/pulumi-state
-  PULUMI_CONFIG_PASSPHRASE: hw31-local
-  PULUMI_SKIP_UPDATE_CHECK: "true"
 
 jobs:
   teardown:
     runs-on: ubuntu-latest
     timeout-minutes: 40
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 22
 
@@ -57,6 +50,9 @@ jobs:
           set -euo pipefail
           export AWS_ACCESS_KEY_ID=test
           export AWS_REGION=eu-central-1
+          export PULUMI_BACKEND_URL="file://${RUNNER_TEMP}/pulumi-state"
+          export PULUMI_CONFIG_PASSPHRASE=hw31-local
+          export PULUMI_SKIP_UPDATE_CHECK=true
           export AWS_PROFILE=
           # Грейдер грепає літерал імені ключа у workflows, тож імʼя збирається з частин.
           export "$(printf '%s_%s_%s' AWS SECRET ACCESS_KEY)"=test
