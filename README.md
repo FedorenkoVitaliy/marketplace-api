@@ -825,6 +825,23 @@ trace-matches-log=1
 span-status-error=1
 ```
 
+### ДЗ#32
+
+```
+git clone https://github.com/FedorenkoVitaliy/marketplace-api.git && cd marketplace-api && git checkout hw-32
+
+npm ci
+
+export SKIP_VAULT=1
+export APP_DB_PASSWORD=grader-secret
+
+npm run demo:gates
+npm run demo:oidc
+PLAN_JSON=/tmp/hw32/plan.json COST_BUDGET_USD=0 npm run gate:cost
+```
+
+`demo:gates`, `demo:oidc` і `gate:cost` не ходять у GitHub і не піднімають кластер. `plan.json` береться з артефакту `pipeline-evidence`, у репозиторій він не комітиться.
+
 ## Auth
 
 Access — короткоживучий JWT **ES256** (P-256) через `jose`; refresh — opaque 32 B, у PG лише `HMAC-SHA256(pepper ‖ token)`.
@@ -1066,4 +1083,32 @@ S3 gateway endpoint не бере погодинну плату і не бере
 Бюджет — лист, не гальмо. Дані оновлюються з лагом 8–12 год. За 12 год стек намотує $0,08191 × 12 = $0,98. BudgetAction спіймала б поріг із тим самим лагом і могла б зупинити інстанс RDS. Ресурс BudgetAction не створювали. Зупиняють тип акаунта і destroy.
 
 Емулятор кроку 7.4 ДЗ #26 — nginx: бреше в бік дозволу, як LocalStack. Прибрати `stale-while-revalidate` з `Cache-Control` недостатньо: `STALE` дає `proxy_cache_use_stale`.
+
+## CI/CD
+
+Конвеєр — два воркфлоу. `.github/workflows/pr.yml` на `pull_request`: джоба `gates` (типи, oasdiff, dependency-cruiser) → `build` (один `docker/build-push-action`, далі `npm run scan`) → `cluster` (`id-token: write` лише тут). `cluster` перевіряє підпис OIDC, піднімає kind `hw28`, робить `pulumi preview`, гейт вартості, `pulumi up` і `demo:rollout`. Артефакт `pipeline-evidence` вивантажується з `if: always()`.
+
+`.github/workflows/deploy.yml` на `push` у `main` і на `workflow_dispatch`. Образ тут не збирається. Ручний запуск бере `digest` уже зібраного образу і ставить його в той самий kind. Push у `main` лише перевіряє OIDC і підхоплює тег `${{ github.sha }}`, якщо він уже є в реєстрі; інакше друкує `promote=skipped` і виходить нулем, бо SHA злиття — не той, яким тегували образ на PR.
+
+Середовище preview — kind на раннері PR, контекст `kind-hw28`, порт `22980`. Середовище promote — той самий кластер із `workflow_dispatch`, образ за digest, не за тегом. Довгоживучого ключа хмари в репозиторії немає: реєстр через токен джоби, хмара через OIDC.
+
+Модулі не лізуть один в одного. Сходинка `arch` у `demo:gates` ганяє dependency-cruiser: файл `*.service.ts` не має права імпортувати `*controller.ts`. Коректне дерево `src` проходить, фікстура `scripts/gates/fixtures/arch` — ні.
+
+Умова довіри — `oidc/policy.json`. Гейт — `scripts/oidc-gate.mjs`. Той самий файл біжить у джобі `cluster` і в `demo:oidc`. `iss` — `https://token.actions.githubusercontent.com`, `aud` — `sts.amazonaws.com`, `sub` — лише цей репозиторій, у двох формах: `repo:FedorenkoVitaliy/marketplace-api:*` і `repo:FedorenkoVitaliy@32368311/marketplace-api@1349719963:*`. Чужий репозиторій із правильним підписом не проходить.
+
+Образ збирається один раз у джобі `build` і їде як `ghcr.io/fedorenkovitaliy/marketplace-api@<digest>`. Тег — SHA голови PR, людині. Пакет GHCR виставляється публічним, щоб digest можна було звірити з реєстру без логіна. `provenance` і `sbom` вимкнені, бо інакше в реєстрі лежить індекс, а не той digest, який віддав крок збірки.
+
+Секрети конвеєра, які воркфлоу читає як `secrets.*` (крім токена, який GitHub видає на час джоби сам):
+
+| Ім'я | Навіщо |
+| --- | --- |
+| `PACT_BROKER_TOKEN` | `pact.yml`: verify і can-i-deploy. Це брокер контрактів, не хмара і не реєстр |
+
+Реєстр логіниться токеном джоби (`github.token`, `packages: write` на збірці). У секретах репозиторія його немає. Змінні застосунку ті самі, що в таблицях зі словом «сховище» вище (`APP_DB_PASSWORD`, ключі JWT, брокер, бакет, OTLP). У джобу вони приїжджають як літерали грейдера через `scripts/ci-env.sh` і `SKIP_VAULT=1`, у под — через `secretKeyRef`, не текстом у маніфесті.
+
+Маскування в лозі замінює лише точне входження значення. Воно не бачить те саме значення в base64, розрізаним на шматки чи надрукованим інструментом у власному форматі. Тому в кроках, які бачать секрет, немає `echo` цього значення, `env`, `printenv` і `set -x`. Це шосте місце витоку після git-історії, логу застосунку, шару образу, `docker inspect` і `docker history`: логи конвеєра.
+
+`src/mapping.ts` перекладає `resources.requests` контейнерів із `pulumi preview --json` у долари на місяць. Ставка — публічний прайс Linux/x86 (us-east-1) на [сторінці Fargate](https://aws.amazon.com/fargate/pricing/): vCPU $0.04048/год, пам'ять $0.004445/ГБ-год, 730 год. Репліки множаться. Локальний kind сам нічого не коштує; рахується запит пода, щоб `plan-usd` був більший за нуль. Бюджет PR — $20. Обхід — лейбл на PR.
+
+cost-gate-bypass-label: cost-approved
 

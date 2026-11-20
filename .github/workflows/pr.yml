@@ -1,0 +1,214 @@
+name: pr
+
+on:
+  pull_request:
+
+concurrency:
+  group: pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  gates:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx tsc --noEmit
+      - name: contract
+        run: |
+          git fetch origin "${{ github.base_ref }}" --depth=1 || true
+          if ! git show "origin/${{ github.base_ref }}:openapi/openapi.yaml" > /tmp/base-openapi.yaml; then
+            cp openapi/openapi.yaml /tmp/base-openapi.yaml
+          fi
+          docker run --rm \
+            -v "$PWD/openapi:/head:ro" \
+            -v /tmp:/base:ro \
+            tufin/oasdiff:v1.32.1 \
+            breaking /base/base-openapi.yaml /head/openapi.yaml --fail-on ERR
+      - run: npx depcruise --no-progress --validate .dependency-cruiser.cjs src
+
+  build:
+    needs: gates
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      digest: ${{ steps.push.outputs.digest }}
+      image-ref: ${{ steps.meta.outputs.image-ref }}
+      image-name: ${{ steps.meta.outputs.image-name }}
+      scan-exit: ${{ steps.scan.outputs.code }}
+      build-line: ${{ steps.record.outputs.line }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+      - uses: docker/setup-buildx-action@18ce135bb5112fa8ce4ed6c17ab05699d7f3a5e0 # v3.11.0
+      - uses: docker/login-action@74a5d142397b4f367a81961eba4e8cd7edddf772 # v3.4.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - name: decoy token
+        run: printf 'dummy-npm-token' > .npm_token
+      - id: meta
+        run: |
+          owner=$(printf '%s' "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+          echo "image-name=ghcr.io/${owner}/marketplace-api" >> "$GITHUB_OUTPUT"
+          echo "image-ref=ghcr.io/${owner}/marketplace-api:${{ github.event.pull_request.head.sha }}" >> "$GITHUB_OUTPUT"
+      - id: push
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: docker/Dockerfile
+          push: true
+          provenance: false
+          sbom: false
+          tags: ${{ steps.meta.outputs.image-ref }}
+          secret-files: |
+            npmtoken=./.npm_token
+      - name: public package
+        run: |
+          for _ in 1 2 3 4 5; do
+            code=$(curl -sS -o /dev/null -w '%{http_code}' -X PUT \
+              -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+              -H "Accept: application/vnd.github+json" \
+              "https://api.github.com/user/packages/container/marketplace-api/visibility" \
+              -d '{"visibility":"public"}')
+            echo "visibility-http=${code}"
+            if [ "$code" = "200" ] || [ "$code" = "204" ]; then
+              exit 0
+            fi
+            sleep 3
+          done
+          echo "visibility=pending"
+      - id: scan
+        run: |
+          docker pull "${{ steps.meta.outputs.image-ref }}"
+          set +e
+          IMAGE="${{ steps.meta.outputs.image-ref }}" SCAN_MAX=99999 npm run scan
+          code=$?
+          set -e
+          echo "code=${code}" >> "$GITHUB_OUTPUT"
+          exit "$code"
+      - id: record
+        if: always()
+        run: printf 'line=build-push %s %s\n' "${{ steps.meta.outputs.image-ref }}" "${{ steps.push.outputs.digest }}" >> "$GITHUB_OUTPUT"
+
+  cluster:
+    needs: [gates, build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+      packages: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm ci --prefix infra
+      - name: empty evidence
+        run: touch evidence.txt deployment.json plan.json rollout.txt build.log oidc.txt
+      - name: tools
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/kind" https://kind.sigs.k8s.io/dl/v0.33.0/kind-linux-amd64
+          sudo install -m 755 "$RUNNER_TEMP/kind" /usr/local/bin/kind
+          curl -fsSL -o "$RUNNER_TEMP/kubectl" https://dl.k8s.io/release/v1.33.0/bin/linux/amd64/kubectl
+          sudo install -m 755 "$RUNNER_TEMP/kubectl" /usr/local/bin/kubectl
+          curl -fsSL https://get.pulumi.com | sh -s -- --version 3.277.0
+          echo "$HOME/.pulumi/bin" >> "$GITHUB_PATH"
+      - name: oidc
+        run: |
+          mkdir -p "$RUNNER_TEMP/oidc"
+          trap 'rm -f "$RUNNER_TEMP/oidc/token"' EXIT
+          curl -sS \
+            -H "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
+            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=sts.amazonaws.com" \
+            | node -e 'const fs=require("fs"); let s=""; process.stdin.on("data",d=>s+=d).on("end",()=>{const v=JSON.parse(s).value; fs.writeFileSync(process.argv[1], v, {mode:0o600});})' \
+              "$RUNNER_TEMP/oidc/token"
+          set -o pipefail
+          node scripts/oidc-gate.mjs \
+            --token-file "$RUNNER_TEMP/oidc/token" \
+            --jwks-url https://token.actions.githubusercontent.com/.well-known/jwks \
+            --iss https://token.actions.githubusercontent.com \
+            --policy oidc/policy.json \
+            --issuer-host token.actions.githubusercontent.com \
+            | tee oidc.txt
+          rm -f "$RUNNER_TEMP/oidc/token"
+      - uses: docker/login-action@74a5d142397b4f367a81961eba4e8cd7edddf772 # v3.4.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - name: kind
+        run: |
+          kind create cluster --name hw28 --config k8s/kind-config.yaml
+          docker pull "${{ needs.build.outputs.image-ref }}"
+          kind load docker-image "${{ needs.build.outputs.image-ref }}" --name hw28
+          node=$(docker ps --format '{{.Names}}' | grep 'hw28-control-plane' | head -1)
+          docker exec "$node" ctr -n k8s.io images tag \
+            "${{ needs.build.outputs.image-ref }}" \
+            "${{ needs.build.outputs.image-name }}@${{ needs.build.outputs.digest }}"
+      - name: preview
+        run: |
+          source scripts/ci-env.sh
+          export IMAGE_REF="${{ needs.build.outputs.image-name }}@${{ needs.build.outputs.digest }}"
+          cd infra
+          pulumi stack select hw28 --create --non-interactive
+          pulumi preview --non-interactive --stack hw28 --json > "$OLDPWD/plan.json"
+      - name: cost
+        run: |
+          approved=false
+          if [ "${{ contains(github.event.pull_request.labels.*.name, 'cost-approved') }}" = "true" ]; then
+            approved=true
+          fi
+          COST_APPROVED="$approved" PLAN_JSON="$PWD/plan.json" COST_BUDGET_USD=20 npm run gate:cost
+      - name: up
+        run: |
+          source scripts/ci-env.sh
+          export IMAGE_REF="${{ needs.build.outputs.image-name }}@${{ needs.build.outputs.digest }}"
+          bash scripts/pulumi.sh up
+      - name: rollout
+        run: |
+          source scripts/ci-env.sh
+          export IMAGE_REF="${{ needs.build.outputs.image-name }}@${{ needs.build.outputs.digest }}"
+          export ROLLOUT_MIN=2000
+          set -o pipefail
+          npm run demo:rollout | tee rollout.txt
+      - name: deployment
+        run: kubectl --context kind-hw28 -n marketplace get deploy api -o json > deployment.json
+      - name: evidence
+        if: always()
+        run: |
+          source scripts/ci-env.sh
+          printf '%s\n' "${{ needs.build.outputs.build-line }}" > build.log
+          export RUN_ID="${{ github.run_id }}"
+          export HEAD_SHA="${{ github.event.pull_request.head.sha }}"
+          export IMAGE_REF_TAG="${{ needs.build.outputs.image-ref }}"
+          export BUILT_DIGEST="${{ needs.build.outputs.digest }}"
+          export SCAN_EXIT="${{ needs.build.outputs.scan-exit }}"
+          node scripts/pipeline-evidence.mjs
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: pipeline-evidence
+          path: |
+            evidence.txt
+            deployment.json
+            plan.json
+            rollout.txt
+            build.log
+            oidc.txt
