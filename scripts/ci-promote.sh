@@ -8,7 +8,6 @@ if [ -n "${1:-}" ]; then
 else
   ref="${name}:${GITHUB_SHA}"
 fi
-printf '%s' "$GITHUB_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
 if ! docker pull "$ref"; then
   echo "promote=skipped"
   exit 0

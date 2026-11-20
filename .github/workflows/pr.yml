@@ -148,9 +148,13 @@ jobs:
             --issuer-host token.actions.githubusercontent.com \
             | tee oidc.txt
           rm -f "$RUNNER_TEMP/oidc/token"
+      - uses: docker/login-action@74a5d142397b4f367a81961eba4e8cd7edddf772 # v3.4.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
       - name: kind
         run: |
-          printf '%s' "$GITHUB_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
           kind create cluster --name hw28 --config k8s/kind-config.yaml
           docker pull "${{ needs.build.outputs.image-ref }}"
           kind load docker-image "${{ needs.build.outputs.image-ref }}" --name hw28
