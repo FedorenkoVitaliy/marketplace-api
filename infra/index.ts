@@ -57,7 +57,7 @@ new k8s.apps.v1.Deployment(name, {
         securityContext: { runAsNonRoot: true, runAsUser: 65532, runAsGroup: 65532 },
         containers: [{
           name: "api",
-          image: "marketplace-api:hw28",
+          image: process.env.IMAGE_REF || "marketplace-api:hw28",
           imagePullPolicy: "IfNotPresent",
           ports: [{ containerPort: 8080 }],
           env: [

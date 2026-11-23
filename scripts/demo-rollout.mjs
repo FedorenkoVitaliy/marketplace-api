@@ -64,7 +64,8 @@ try {
   console.log(`ok=${ok}`);
   console.log(`failed=${failed}`);
   console.log(`rollout-seconds=${rolloutSeconds}`);
-  finish(failed === 0 && requests >= 5000 ? 0 : 1);
+  const minRequests = Number(process.env.ROLLOUT_MIN ?? 5000);
+  finish(failed === 0 && requests >= minRequests ? 0 : 1);
 } catch (error) {
   console.error(error instanceof Error ? error.message : error);
   finish(1);
