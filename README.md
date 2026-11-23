@@ -1088,7 +1088,7 @@ S3 gateway endpoint не бере погодинну плату і не бере
 
 Конвеєр — два воркфлоу. `.github/workflows/pr.yml` на `pull_request`: джоба `gates` (типи, oasdiff, dependency-cruiser) → `build` (один `docker/build-push-action`, далі `npm run scan`) → `cluster` (`id-token: write` лише тут). `cluster` перевіряє підпис OIDC, піднімає kind `hw28`, робить `pulumi preview`, гейт вартості, `pulumi up` і `demo:rollout`. Артефакт `pipeline-evidence` вивантажується з `if: always()`.
 
-`.github/workflows/deploy.yml` на `push` у `main` і на `workflow_dispatch`. Образ тут не збирається. Ручний запуск бере `digest` уже зібраного образу і ставить його в той самий kind. Push у `main` лише перевіряє OIDC і підхоплює тег `${{ github.sha }}`, якщо він уже є в реєстрі; інакше друкує `promote=skipped` і виходить нулем, бо SHA злиття — не той, яким тегували образ на PR.
+`.github/workflows/deploy.yml` на `push` у `main` і на `workflow_dispatch`. Образ тут не збирається. Ручний запуск бере `digest` уже зібраного образу і ставить його в той самий kind. Push у `main` бере digest голови злитого PR (тег, яким образ зібрали на PR) і ставить його. Якщо такого образу немає, крок червоний.
 
 Середовище preview — kind на раннері PR, контекст `kind-hw28`, порт `22980`. Середовище promote — той самий кластер із `workflow_dispatch`, образ за digest, не за тегом. Довгоживучого ключа хмари в репозиторії немає: реєстр через токен джоби, хмара через OIDC.
 

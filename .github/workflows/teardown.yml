@@ -60,8 +60,7 @@ jobs:
           export PULUMI_CONFIG_PASSPHRASE=hw31-local
           export PULUMI_SKIP_UPDATE_CHECK=true
           unset AWS_PROFILE AWS_SESSION_TOKEN AWS_SECURITY_TOKEN
-          # Грейдер грепає літерал імені ключа у workflows, тож імʼя збирається з частин.
-          export "$(printf '%s_%s_%s' AWS SECRET ACCESS_KEY)"=test
+          export AWS_SECRET_ACCESS_KEY=test
 
           EP=http://127.0.0.1:23166
           mkdir -p "${PULUMI_BACKEND_URL#file://}"
@@ -87,6 +86,7 @@ jobs:
           demo_up=$?
           set -e
           if [ "$demo_up" -ne 0 ]; then
+            # Немає активного оновлення — cancel повертає помилку, destroy усе одно має пройти.
             pulumi cancel --yes --stack demo || true
           fi
 
