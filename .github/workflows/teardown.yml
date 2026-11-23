@@ -53,12 +53,14 @@ jobs:
           set -euo pipefail
           export AWS_ACCESS_KEY_ID=test
           export AWS_REGION=eu-central-1
+          export AWS_DEFAULT_REGION=eu-central-1
+          export AWS_EC2_METADATA_DISABLED=true
+          export AWS_PAGER=
           export PULUMI_BACKEND_URL="file://${RUNNER_TEMP}/pulumi-state"
           export PULUMI_CONFIG_PASSPHRASE=hw31-local
           export PULUMI_SKIP_UPDATE_CHECK=true
-          export AWS_PROFILE=
-          # Грейдер грепає літерал імені ключа у workflows, тож імʼя збирається з частин.
-          export "$(printf '%s_%s_%s' AWS SECRET ACCESS_KEY)"=test
+          unset AWS_PROFILE AWS_SESSION_TOKEN AWS_SECURITY_TOKEN
+          export AWS_SECRET_ACCESS_KEY=test
 
           EP=http://127.0.0.1:23166
           mkdir -p "${PULUMI_BACKEND_URL#file://}"
@@ -66,42 +68,58 @@ jobs:
 
           cd "$GITHUB_WORKSPACE/infra/base"
           pulumi stack select base --create --non-interactive
-          # Budgets на community-ліцензії LocalStack відповідає 501. Створене до цієї помилки все одно зносимо.
-          pulumi up --yes --non-interactive --stack base || true
+          # Budgets на community-ліцензії LocalStack відповідає 501. Решта стеку створюється попри цю помилку.
+          set +e
+          pulumi up --yes --non-interactive --continue-on-error --stack base
+          base_up=$?
+          set -e
+          vpc_id="$(pulumi stack output vpcId --stack base)"
+          if [ -z "$vpc_id" ]; then
+            echo "base не віддав vpcId, код ${base_up}" >&2
+            exit 1
+          fi
 
           cd "$GITHUB_WORKSPACE/infra/demo"
           pulumi stack select demo --create --non-interactive
-          pulumi up --yes --non-interactive --stack demo || pulumi cancel --yes --stack demo || true
-
-          pulumi destroy --yes --non-interactive --stack demo || true
-          pulumi stack export --stack demo > "$RUNNER_TEMP/demo.json" || true
-          if [ ! -s "$RUNNER_TEMP/demo.json" ]; then
-            printf '%s\n' '{"deployment":{"resources":[]}}' > "$RUNNER_TEMP/demo.json"
+          set +e
+          pulumi up --yes --non-interactive --stack demo
+          demo_up=$?
+          set -e
+          if [ "$demo_up" -ne 0 ]; then
+            # Немає активного оновлення — cancel повертає помилку, destroy усе одно має пройти.
+            pulumi cancel --yes --stack demo || true
           fi
 
-          # Тег-запит рахує весь Project. base зноситься після export demo, до підрахунків.
-          cd "$GITHUB_WORKSPACE/infra/base"
-          pulumi destroy --yes --non-interactive --stack base || true
+          pulumi destroy --yes --non-interactive --stack demo
+          state="$(pulumi stack export --stack demo | jq '[.deployment.resources[]? | select(.type | startswith("aws:"))] | length')"
 
-          # Помилка платного API емулятора не є списком: у рядок ключа йде одне число.
-          count() {
-            local n
-            n=$(aws "$@" --output text || true)
-            n=${n//[[:space:]]/}
-            if [[ "$n" =~ ^[0-9]+$ ]]; then
-              printf '%s' "$n"
-            else
-              printf '0'
+          cd "$GITHUB_WORKSPACE/infra/base"
+          pulumi destroy --yes --non-interactive --stack base
+
+          num() {
+            local name="$1" value="$2"
+            value="${value//[[:space:]]/}"
+            if [[ ! "$value" =~ ^[0-9]+$ ]]; then
+              echo "${name} не число: ${value:-порожньо}" >&2
+              exit 1
             fi
+            printf '%s' "$value"
+          }
+          tagged_region() {
+            aws resourcegroupstaggingapi get-resources --endpoint-url "$EP" --region "$1" \
+              --tag-filters Key=Project,Values=nodejs-pro-hw31 Key=Stack,Values=demo \
+              --query "length(ResourceTagMappingList[?!contains(ResourceARN, ':natgateway/')])" --output text
           }
 
           R="$AWS_REGION"
-          state=$(jq '[.deployment.resources // [] | .[] | select(.type|startswith("aws:"))] | length' "$RUNNER_TEMP/demo.json")
-          tagged=$(( $(count resourcegroupstaggingapi get-resources --endpoint-url "$EP" --region "$R" --tag-filters Key=Project,Values=nodejs-pro-hw31 --query 'length(ResourceTagMappingList)') + $(count resourcegroupstaggingapi get-resources --endpoint-url "$EP" --region us-east-1 --tag-filters Key=Project,Values=nodejs-pro-hw31 --query 'length(ResourceTagMappingList)') ))
-          rds=$(count rds describe-db-instances --endpoint-url "$EP" --region "$R" --query 'length(DBInstances)')
-          alb=$(count elbv2 describe-load-balancers --endpoint-url "$EP" --region "$R" --query 'length(LoadBalancers)')
-          nat=$(count ec2 describe-nat-gateways --endpoint-url "$EP" --region "$R" --filter Name=state,Values=available --query 'length(NatGateways)')
-          eip=$(count ec2 describe-addresses --endpoint-url "$EP" --region "$R" --query 'length(Addresses)')
+          state="$(num state-resources-left "$state")"
+          tagged_here="$(tagged_region "$R")"
+          tagged_east="$(tagged_region us-east-1)"
+          tagged="$(( $(num tagged-here "$tagged_here") + $(num tagged-east "$tagged_east") ))"
+          rds="$(num rds-left "$(aws rds describe-db-instances --endpoint-url "$EP" --region "$R" --query 'length(DBInstances)' --output text)")"
+          alb="$(num alb-left "$(aws elbv2 describe-load-balancers --endpoint-url "$EP" --region "$R" --query 'length(LoadBalancers)' --output text)")"
+          nat="$(num nat-left "$(aws ec2 describe-nat-gateways --endpoint-url "$EP" --region "$R" --filter Name=state,Values=available,pending --query 'length(NatGateways)' --output text)")"
+          eip="$(num eip-left "$(aws ec2 describe-addresses --endpoint-url "$EP" --region "$R" --query 'length(Addresses)' --output text)")"
 
           echo "state-resources-left=$state"
           echo "tagged-resources-left=$tagged"

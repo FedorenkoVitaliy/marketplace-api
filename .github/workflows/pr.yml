@@ -47,7 +47,6 @@ jobs:
       image-ref: ${{ steps.meta.outputs.image-ref }}
       image-name: ${{ steps.meta.outputs.image-name }}
       scan-exit: ${{ steps.scan.outputs.code }}
-      build-line: ${{ steps.record.outputs.line }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -96,14 +95,25 @@ jobs:
         run: |
           docker pull "${{ steps.meta.outputs.image-ref }}"
           set +e
-          IMAGE="${{ steps.meta.outputs.image-ref }}" SCAN_MAX=99999 npm run scan
+          IMAGE="${{ steps.meta.outputs.image-ref }}" SCAN_MAX=20 npm run scan
           code=$?
           set -e
           echo "code=${code}" >> "$GITHUB_OUTPUT"
           exit "$code"
-      - id: record
+      - name: build log
         if: always()
-        run: printf 'line=build-push %s %s\n' "${{ steps.meta.outputs.image-ref }}" "${{ steps.push.outputs.digest }}" >> "$GITHUB_OUTPUT"
+        run: |
+          digest="${{ steps.push.outputs.digest }}"
+          if [ -z "$digest" ]; then
+            echo "збірки не було" >&2
+            exit 1
+          fi
+          printf 'build-push %s %s\n' "${{ steps.meta.outputs.image-ref }}" "$digest" >> build.log
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: build-log
+          path: build.log
 
   cluster:
     needs: [gates, build]
@@ -121,7 +131,7 @@ jobs:
       - run: npm ci
       - run: npm ci --prefix infra
       - name: empty evidence
-        run: touch evidence.txt deployment.json plan.json rollout.txt build.log oidc.txt
+        run: touch evidence.txt deployment.json plan.json rollout.txt oidc.txt
       - name: tools
         run: |
           curl -fsSL -o "$RUNNER_TEMP/kind" https://kind.sigs.k8s.io/dl/v0.33.0/kind-linux-amd64
@@ -190,11 +200,15 @@ jobs:
           npm run demo:rollout | tee rollout.txt
       - name: deployment
         run: kubectl --context kind-hw28 -n marketplace get deploy api -o json > deployment.json
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        if: always()
+        with:
+          name: build-log
+          path: .
       - name: evidence
         if: always()
         run: |
           source scripts/ci-env.sh
-          printf '%s\n' "${{ needs.build.outputs.build-line }}" > build.log
           export RUN_ID="${{ github.run_id }}"
           export HEAD_SHA="${{ github.event.pull_request.head.sha }}"
           export IMAGE_REF_TAG="${{ needs.build.outputs.image-ref }}"
