@@ -4,17 +4,27 @@
 
 ## Приймальний прогін
 
-Один сценарій: логін покупця, читання його замовлення з токеном, відмова без токена. `demo:auth` піднімає той самий Nest, сідає покупця `buyer@shop.test` і друкує `with-token=200` та `no-token=401`.
+Команди в тому порядку, в якому їх знімають до захисту. Compose піднімає Postgres, Rabbit, Redis і MinIO. Процес API лишається на хості: секрети приходять зі сховища через `scripts/with-secrets.sh`, а не з файлу в git.
 
 ```bash
-docker compose up -d --wait
 npm ci
 npm run build
+docker compose up -d --wait
 bash scripts/with-secrets.sh dev npm run migrate
-bash scripts/with-secrets.sh dev npm run demo:auth
+bash scripts/with-secrets.sh dev npm start
 ```
 
-Живий процес (`bash scripts/with-secrets.sh dev npm start`) на `GET /orders/:id` пише pino-рядок із `layer=orders.controller` і `trace_id`. Окремо корелятор без решти стека показує `npm run demo:logs`. Liveness процесу — `GET /healthz` (без бази). Readiness — `GET /readyz` (`SELECT 1`, інакше 503).
+`npm start` слухає `3000`. У другому терміналі:
+
+```bash
+curl -fsS http://127.0.0.1:3000/health
+git log --all -- .env
+grep -in "джерело\|OWASP" README.md
+```
+
+`/health` віддає `uptime` і базу не чіпає. `/healthz` — liveness, теж без бази. `/readyz` робить `SELECT 1` і без з'єднання відповідає 503. Порожній `git log -- .env` і таблиці нижче (колонка «Джерело», OWASP Top 10:2025) — частина цього ж прогону.
+
+Той самий процес на `GET /orders/:id` пише pino-рядок із `layer=orders.controller` і `trace_id`. Окремо корелятор без решти стека показує `npm run demo:logs`. Бізнес-крок прогону: `bash scripts/with-secrets.sh dev npm run demo:auth` сідає покупця `buyer@shop.test` і друкує `with-token=200` та `no-token=401`.
 
 Образ у kind лишається probe-сервером з ДЗ#28: у поді немає Postgres, Redis і Rabbit, а вимір дивиться на викочування без жодної невдалої відповіді. Бізнес-контур рев'юер проходить локально, командами вище. Зелений деплой конвеєра і teardown із шістьма нулями — докази блока розгортання, не заміна цього прогону.
 
@@ -103,7 +113,7 @@ Zod-схема `src/config/env.schema.ts` — єдине місце, яке чи
 
 | Змінна / секрет | Джерело | На старті / на зʼєднання |
 |---|---|---|
-| `PORT` | `.env` (приклад у `.env.example`) | старт, Zod coerce number 1024–65535 |
+| `PORT` | `.env` або сховище; якщо змінної немає — `3000` | старт, Zod coerce number 1024–65535 |
 | `DB_URL` | `.env` | старт, host/user/db з URL; пароль з URL **не** йде в `pg.Pool` (інакше затре функцію з файла) |
 | `LOG_LEVEL` | `.env`, дефолт `info` | старт |
 | пароль `app_user` | файл `secrets/db_password` (gitignored) | кожне **нове** зʼєднання пулу |
