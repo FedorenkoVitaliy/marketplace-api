@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+export SKIP_VAULT=1
+export PULUMI_CONFIG_PASSPHRASE=hw28-grading
+export PULUMI_BACKEND_URL="file://${PWD}/.pulumi"
+mkdir -p "${PULUMI_BACKEND_URL#file://}"
+export APP_DB_PASSWORD=grader-secret
+export PACT_BROKER_URL=http://127.0.0.1:21620
+export PACT_BROKER_TOKEN=grader-pact-token
+export JWT_PRIVATE_KEY=grader-jwt-private
+export JWT_PUBLIC_KEY=grader-jwt-public
+export JWT_KID=grader-kid
+export REFRESH_TOKEN_PEPPER=grader-pepper
+export STORAGE_ENDPOINT=http://127.0.0.1:22650
+export STORAGE_ACCESS_KEY=grader-storage-access
+export STORAGE_SECRET_KEY=grader-storage-secret
+export STORAGE_BUCKET=hw26-files
+export OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:22918
+export PROMETHEUS_URL=http://127.0.0.1:22911
+export TRACE_API_URL=http://127.0.0.1:22904
+export ROLLOUT_MIN="${ROLLOUT_MIN:-2000}"
