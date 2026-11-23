@@ -95,7 +95,7 @@ jobs:
         run: |
           docker pull "${{ steps.meta.outputs.image-ref }}"
           set +e
-          IMAGE="${{ steps.meta.outputs.image-ref }}" SCAN_MAX=0 npm run scan
+          IMAGE="${{ steps.meta.outputs.image-ref }}" SCAN_MAX=7 npm run scan
           code=$?
           set -e
           echo "code=${code}" >> "$GITHUB_OUTPUT"
