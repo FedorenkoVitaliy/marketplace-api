@@ -1,0 +1,106 @@
+{
+  "AssumeRolePolicyDocument": {
+    "Version": "2012-10-17",
+    "Statement": [
+      {
+        "Effect": "Allow",
+        "Principal": {
+          "Federated": "arn:aws:iam::000000000000:oidc-provider/token.actions.githubusercontent.com"
+        },
+        "Action": "sts:AssumeRoleWithWebIdentity",
+        "Condition": {
+          "StringEquals": {
+            "token.actions.githubusercontent.com:aud": "sts.amazonaws.com"
+          },
+          "StringLike": {
+            "token.actions.githubusercontent.com:sub": [
+              "repo:FedorenkoVitaliy/marketplace-api:*",
+              "repo:FedorenkoVitaliy@*/marketplace-api@*:*"
+            ]
+          }
+        }
+      }
+    ]
+  },
+  "PolicyDocument": {
+    "Version": "2012-10-17",
+    "Statement": [
+      {
+        "Sid": "Rds",
+        "Effect": "Allow",
+        "Action": [
+          "rds:DeleteDBInstance",
+          "rds:DescribeDBInstances",
+          "rds:DeleteDBSubnetGroup",
+          "rds:DescribeDBSubnetGroups",
+          "rds:ListTagsForResource"
+        ],
+        "Resource": "*"
+      },
+      {
+        "Sid": "Elb",
+        "Effect": "Allow",
+        "Action": [
+          "elasticloadbalancing:DeleteLoadBalancer",
+          "elasticloadbalancing:DeleteListener",
+          "elasticloadbalancing:DeleteTargetGroup",
+          "elasticloadbalancing:DeregisterTargets",
+          "elasticloadbalancing:DescribeLoadBalancers",
+          "elasticloadbalancing:DescribeListeners",
+          "elasticloadbalancing:DescribeTargetGroups",
+          "elasticloadbalancing:DescribeTargetHealth",
+          "elasticloadbalancing:DescribeLoadBalancerAttributes",
+          "elasticloadbalancing:DescribeTargetGroupAttributes",
+          "elasticloadbalancing:DescribeTags"
+        ],
+        "Resource": "*"
+      },
+      {
+        "Sid": "NatAndAddresses",
+        "Effect": "Allow",
+        "Action": [
+          "ec2:DeleteNatGateway",
+          "ec2:DescribeNatGateways",
+          "ec2:ReleaseAddress",
+          "ec2:DisassociateAddress",
+          "ec2:DescribeAddresses"
+        ],
+        "Resource": "*"
+      },
+      {
+        "Sid": "Lambda",
+        "Effect": "Allow",
+        "Action": [
+          "lambda:DeleteFunction",
+          "lambda:GetFunction",
+          "lambda:RemovePermission",
+          "lambda:GetPolicy"
+        ],
+        "Resource": "*"
+      },
+      {
+        "Sid": "IamDemoRole",
+        "Effect": "Allow",
+        "Action": [
+          "iam:DeleteRole",
+          "iam:GetRole",
+          "iam:DetachRolePolicy",
+          "iam:ListAttachedRolePolicies",
+          "iam:ListRolePolicies",
+          "iam:DeleteRolePolicy",
+          "iam:ListInstanceProfilesForRole"
+        ],
+        "Resource": "*"
+      },
+      {
+        "Sid": "Audit",
+        "Effect": "Allow",
+        "Action": [
+          "tag:GetResources",
+          "sts:GetCallerIdentity"
+        ],
+        "Resource": "*"
+      }
+    ]
+  }
+}

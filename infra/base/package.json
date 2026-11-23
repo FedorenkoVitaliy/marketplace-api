@@ -1,0 +1,22 @@
+{
+  "name": "hw31-base",
+  "private": true,
+  "description": "Pulumi stack base: budget, VPC, security groups, GitHub OIDC",
+  "scripts": {
+    "up:base": "bash ../../scripts/with-secrets.sh dev bash ../../scripts/hw31-up-base.sh",
+    "up:demo": "bash ../../scripts/with-secrets.sh dev bash ../../scripts/hw31-up-demo.sh",
+    "destroy:demo": "bash ../../scripts/with-secrets.sh dev bash ../../scripts/hw31-destroy-demo.sh",
+    "destroy:base": "bash ../../scripts/with-secrets.sh dev bash ../../scripts/hw31-destroy-base.sh",
+    "demo:failover": "bash ../../scripts/with-secrets.sh dev bash ../../scripts/hw31-demo-failover.sh",
+    "demo:nat": "bash ../../scripts/with-secrets.sh dev bash ../../scripts/hw31-demo-nat.sh",
+    "demo:alb": "bash ../../scripts/with-secrets.sh dev bash ../../scripts/hw31-demo-alb.sh"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "^6.0.3"
+  },
+  "dependencies": {
+    "@pulumi/aws": "^6.66.0",
+    "@pulumi/pulumi": "^3.144.0"
+  }
+}

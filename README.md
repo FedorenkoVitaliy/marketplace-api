@@ -252,6 +252,107 @@ SKIP LOCKED 322 мс · w1=3 w2=3 w3=3 w4=3 · оброблено двічі: 0
 
 У DataSource `synchronize: false`. Схему ставить лише `migration:run`.
 
+### ДЗ#31
+
+Смуга запасна. D2, D3 і D4 на цій смузі не оцінюються. Ключів живого виміру в `evidence/demos.txt` немає навмисно: немає `az-before`, `az-after`, `failover-seconds`, `event`, `alb-dns`, `http-code`, `target-state`, `nat-minutes`, `nat-billed-hours`. Доказ знесення — прогін teardown у GitHub Actions, у логу якого шість ключів дорівнюють нулю. Локальний рядок `state-resources-left=0` лишається поруч.
+
+```bash
+REPO=FedorenkoVitaliy/marketplace-api
+
+# A1
+for d in infra/base infra/demo; do
+  ( cd "$d" && npm ci >/dev/null 2>&1 && npx tsc --noEmit ); echo "$d exit=$?"
+done
+
+# A2
+grep -qE '^vpc-id=vpc-[0-9a-f]+$' evidence/base.txt && echo "vpc-id OK"
+for k in public-subnets=2 private-subnets=2 subnet-azs=2 private-default-route=0; do
+  grep -qx "$k" evidence/base.txt && echo "$k OK" || echo "НЕМАЄ: $k"
+done
+awk -F= '/^security-groups=/{print ($2>=2) ? "security-groups OK ("$2")" : "SG мало: "$2}' evidence/base.txt
+
+# A3
+awk -F= '/^tagged-resources=/{print ($2>=8) ? "теги OK ("$2")" : "теги: "$2}' evidence/base.txt
+jq -r '[.deployment.resources[]? | select(.type=="aws:ec2/subnet:Subnet") | .outputs.availabilityZone] | map(select(. != null)) | unique | length' evidence/base-state.json
+
+# A4
+jq '[.deployment.resources[]?.type | select(test("aws:rds/|aws:lb/|aws:ec2/natGateway|aws:ec2/instance:|aws:ec2/eip:|aws:elasticache/"))] | length' evidence/base-state.json
+
+# B1
+grep -c 'token.actions.githubusercontent.com' evidence/iam.json
+grep -c 'sts.amazonaws.com' evidence/iam.json
+grep -c "${REPO##*/}" evidence/iam.json
+jq -r '[.. | objects | .Action? // empty] | flatten | map(select(. == "*")) | length' evidence/iam.json
+
+# B2
+grep -qx 'sim-allowed=allowed' evidence/iam.txt && echo "позитив OK"
+grep -qE '^sim-denied=(implicitDeny|explicitDeny)$' evidence/iam.txt && echo "негатив OK"
+
+# B3
+git ls-files -z | xargs -0 grep -lE 'AKIA[0-9A-Z]{16}|ASIA[0-9A-Z]{16}|aws_secret_access_key *='
+grep -rlE 'AWS_SECRET_ACCESS_KEY|aws-secret-access-key' .github/workflows/
+grep -cE 'id-token: *write' .github/workflows/teardown.yml
+PKG=$(git ls-files 'package.json' '*/package.json' | grep -v node_modules | head -1)
+echo "package.json: ${PKG:-НЕМАЄ}"
+node -e "const s=require(require('path').resolve(process.argv[1])).scripts||{};const need=['up:base','up:demo','destroy:demo','destroy:base','demo:failover','demo:nat','demo:alb'];const bad=need.filter(k=>!/with-secrets\.sh/.test(s[k]||''));console.log(bad.length?('без обгортки: '+bad.join(', ')):'OK')" "$PKG"
+
+# C1
+B=$(git ls-files | xargs grep -lE 'budgets\.Budget' 2>/dev/null | head -1)
+D=$(git ls-files | xargs grep -lE 'rds\.Instance|lb\.LoadBalancer' 2>/dev/null | head -1)
+tb=$(git log --diff-filter=A --format=%ct -- "$B" | tail -1)
+td=$(git log --diff-filter=A --format=%ct -- "$D" | tail -1)
+echo "budget=$B($tb) paid=$D($td)"
+[ -n "$tb" ] && [ -n "$td" ] && [ "$tb" -le "$td" ] && echo "порядок OK" || echo "ПРОВАЛ"
+
+# C2
+B=$(git ls-files | xargs grep -lE 'budgets\.Budget' 2>/dev/null | head -1)
+grep -c 'ACTUAL' "$B"
+grep -c 'FORECASTED' "$B"
+grep -cE '(limitAmount|limit_amount)[^0-9]+5([^0-9]|$)' "$B"
+
+# C3
+grep -cE '^ *schedule:' .github/workflows/teardown.yml
+grep -cE '^ *workflow_dispatch:' .github/workflows/teardown.yml
+grep -cE 'pulumi +destroy' .github/workflows/teardown.yml
+
+# D1
+RF=$(git ls-files | xargs grep -lE 'rds\.Instance' 2>/dev/null | head -1)
+grep -cE 'multiAz: *true' "$RF"
+grep -cE 'db\.t4g\.micro|db\.t3\.micro' "$RF"
+grep -cE 'storageEncrypted: *true' "$RF"
+git grep -lE 'skipFinalSnapshot|registerResourceTransform' -- '*.ts' | wc -l
+```
+
+Запасна смуга. A — як на основній. B — по документу політики, не по симулятору: абзац вище і `evidence/localstack-iam.txt`. C — бюджет у коді; знесення = `pulumi destroy` і локальний `state-resources-left=0`; `file://` можна. D2–D4 не оцінюються. Код усе одно обовʼязковий: інстанс RDS (Multi-AZ instance), балансувальник з target group, `evidence/preview-demo.txt`, `evidence/501.txt`, абзац порівняння зі стеком #15.
+
+```bash
+grep -ciE '^ *смуга: *запасна' README.md
+grep -c 'not included within your LocalStack license' evidence/501.txt
+grep -cE 'aws:rds/instance:Instance' evidence/preview-demo.txt
+for k in deny-all=200 fake-key=200 enforce-iam-log-lines=0; do
+  grep -qx "$k" evidence/localstack-iam.txt && echo "$k OK" || echo "НЕМАЄ: $k"
+done
+grep -qx 'state-resources-left=0' evidence/demos.txt && echo "знесено OK"
+```
+
+Шість команд порожнечі, які джоба основної смуги друкує в лог. На цій смузі доказом є локальний рядок, не цей лог.
+
+```bash
+pulumi stack export | jq '[.deployment.resources[]|select(.type|startswith("aws:"))]|length'
+
+aws resourcegroupstaggingapi get-resources --region "$R" \
+  --tag-filters Key=Project,Values=nodejs-pro-hw31 --query 'length(ResourceTagMappingList)'
+
+aws rds describe-db-instances --region "$R" --query 'length(DBInstances)'
+
+aws elbv2 describe-load-balancers --region "$R" --query 'length(LoadBalancers)'
+
+aws ec2 describe-nat-gateways --region "$R" --filter Name=state,Values=available \
+                                  --query 'length(NatGateways)'
+
+aws ec2 describe-addresses   --region "$R" --query 'length(Addresses)'
+```
+
 ### ДЗ#15
 
 Грейдер клонує гілку `hw-15`. Сховища немає: `SKIP_VAULT=1` і дев-креденшели з compose. `DATABASE_URL` дивиться на PgBouncer (`6432`), не на прямий Postgres.
@@ -619,6 +720,111 @@ new-url=200
 content-changed=1
 ```
 
+### ДЗ#28
+
+Грейдер клонує `hw-28`. Сховища немає — `SKIP_VAULT=1` і експорт нижче. Нових `.env` немає. Бекенд Pulumi лише локальний файл, інакше `pulumi` піде в логін.
+
+```bash
+export SKIP_VAULT=1
+export APP_DB_PASSWORD=grader-secret
+export PULUMI_CONFIG_PASSPHRASE=hw28-grading
+export PULUMI_BACKEND_URL="file://$PWD/.pulumi"
+export PACT_BROKER_URL=http://127.0.0.1:21620
+export PACT_BROKER_TOKEN=grader-pact-token
+export JWT_PRIVATE_KEY=grader-jwt-private
+export JWT_PUBLIC_KEY=grader-jwt-public
+export JWT_KID=grader-kid
+export REFRESH_TOKEN_PEPPER=grader-pepper
+export STORAGE_ENDPOINT=http://127.0.0.1:22650
+export STORAGE_ACCESS_KEY=hw26user
+export STORAGE_SECRET_KEY=hw26secretpass
+export STORAGE_BUCKET=hw26-files
+export OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:22918
+export PROMETHEUS_URL=http://127.0.0.1:22911
+export TRACE_API_URL=http://127.0.0.1:22904
+printf 'dummy-npm-token' > .npm_token
+npm --prefix infra ci
+cd infra && npx tsc --noEmit
+cd ..
+npm run image:build
+npm run cluster:up
+npm run up
+npm run demo:image
+npm run demo:rollout
+npm run demo:pdb
+```
+
+Після перевірки: `npm run destroy && npm run cluster:down`.
+
+Прогін 06.11.2026:
+
+```
+stages=2
+shell-inside=0
+runtime-uid=65532
+token-in-history=0
+token-in-config=0
+token-in-layers=0
+
+profile=good
+requests=7721
+ok=7721
+failed=0
+rollout-seconds=15
+
+healthy=2
+minAvailable=1
+evict-1=201
+evict-2=429
+```
+
+`scan` на цьому ж образі порахував `found=7` при `severity=CRITICAL,HIGH`: з `SCAN_MAX=-1` вийшло `gate=fail` і код 1, з `SCAN_MAX=99999` — `gate=pass` і код 0. Другий викот підряд теж дав `failed=0`.
+
+### ДЗ#29
+
+Грейдер клонує `hw-29`. Сховища немає — `SKIP_VAULT=1` і експорт нижче. Стенд спостережуваності окремий від кореневого compose: повний `--wait` там чекав би ще й Rabbit.
+
+```bash
+export SKIP_VAULT=1
+export OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:22918
+export PROMETHEUS_URL=http://127.0.0.1:22911
+export TRACE_API_URL=http://127.0.0.1:22904
+docker compose -f observability/compose.yml up -d --wait
+npm ci
+npx tsc --noEmit
+npm run demo:logs
+npm run demo:metrics
+npm run demo:trace
+```
+
+Прогін 13.11.2026, кожне демо двічі підряд з тим самим виводом:
+
+```
+non-json-lines=0
+layers=3
+distinct-trace-ids=1
+trace-id-matches-header=1
+burst=8
+burst-trace-ids=8
+burst-uneven=0
+secret-req-logged=1
+secret-in-logs=0
+
+sent-ok=40
+sent-fail=15
+counter-delta=55
+errors-delta=15
+above-top-bucket=0
+series-before=2
+series-after=2
+
+spans=2
+orphan-spans=0
+trace-matches-header=1
+trace-matches-log=1
+span-status-error=1
+```
+
 ## Auth
 
 Access — короткоживучий JWT **ES256** (P-256) через `jose`; refresh — opaque 32 B, у PG лише `HMAC-SHA256(pepper ‖ token)`.
@@ -703,4 +909,161 @@ Bucket policy для AWS + OAC (у цій здачі дистрибуцію не
 Приватний контент дистрибуції (не цей публічний edge) далі закривався б signed URL або signed cookies CloudFront на хвилину, з гардом на кожен запит. У коді цього немає.
 
 Числа прогону — у блоці `### ДЗ#26` вище.
+
+## Kubernetes
+
+Кластер підіймав **kind** (один control-plane, `k8s/kind-config.yaml`, ім'я `hw28`). Окремого ліміта пам'яті, як у minikube `--memory`, у kind немає: вузол бере стільки, скільки дасть Docker. На цій машині Docker має 7,7 ГіБ; після `cluster:up` вузол `hw28-control-plane` займає близько 770 МіБ. minikube відсікає старт нижче 1800 МБ, тому його тут немає.
+
+Образ `marketplace-api:hw28` — дві стадії: збірка на `node:22-slim`, запуск на `gcr.io/distroless/nodejs22-debian12:nonroot`. У фіналі немає shell, процес під uid 65532 (`USER 65532` і `runAsUser: 65532`). Повний Nest у цей под не їде: йому потрібні Postgres, Redis і Rabbit, а вимір дивиться на те, чи живе сокет під викочуванням. Процес у поді відповідає на `/healthz`, поки живий, на `/readyz` лише коли готовий, і на SIGTERM спершу гасить `/readyz`, тримає дренаж 8 с і лише потім закриває сокет. До `listen` він чекає 4 с. `terminationGracePeriodSeconds` — 30, це більше за дренаж.
+
+Порт на хості `22980` → NodePort `30980`. Після кожної збірки `cluster:up` робить `kind load`: образ з хоста в кластері сам не з'являється.
+
+| Змінна | Джерело | Навіщо |
+|---|---|---|
+| `APP_DB_PASSWORD` | сховище (#11) | пароль до БД, їде в Secret `app-db` і в под через `secretKeyRef` |
+| `PULUMI_CONFIG_PASSPHRASE` | сховище (#11) | ключ шифрування стану Pulumi |
+| `PACT_BROKER_URL` | сховище | адреса брокера; без неї `pulumi preview` падає до кластера |
+| `PACT_BROKER_TOKEN` | сховище | токен брокера |
+| `JWT_PRIVATE_KEY` | сховище | ключ підпису; у Deployment лише не потрапляє значенням |
+| `JWT_PUBLIC_KEY` | сховище | ключ перевірки |
+| `JWT_KID` | сховище | активний kid |
+| `REFRESH_TOKEN_PEPPER` | сховище | pepper refresh-токена |
+| `STORAGE_ENDPOINT` | сховище | S3 API |
+| `STORAGE_ACCESS_KEY` | сховище | access key |
+| `STORAGE_SECRET_KEY` | сховище | secret key |
+| `STORAGE_BUCKET` | сховище | бакет |
+
+Програма в `infra/` перевіряє кожну з цих змінних першою дією і кидає її ім'я, якщо значення порожнє. Дефолтів немає. У Deployment значення немає: лише `secretKeyRef` на `APP_DB_PASSWORD`. Решта потрібна, щоб розгортання без сховища назвало саме ту змінну, яку зняли.
+
+`spec.replicas` лишається `2`, і поруч оголошений HPA `autoscaling/v2` (`minReplicas` 2, `maxReplicas` 4, CPU 70%). У kind немає metrics-server, тому HPA показує `cpu: <unknown>/70%` і репліки не чіпає — це очікувано, поле лишається за програмою. У бойовому кластері з metrics-server це вже конфлікт володіння: і Pulumi, і HPA пишуть `replicas`. Наступний `pulumi up` поверне число з програми і затре те, що виставив автоскейлер.
+
+Секрет рантайму приїжджає з тієї самої обгортки `scripts/with-secrets.sh`, що й раніше: програма кладе його в Secret (`data`, base64, не `stringData`), под читає посиланням. base64 тут не шифрування — у etcd локального кластера значення лежить відкритим текстом. Промисловий шлях інший: External Secrets Operator синхронізує секрет зі сховища в Secret, або CSI-драйвер монтує його файлом у под, без копії в etcd. Оператор у цей кластер не ставив.
+
+`startupProbe` на `/healthz`: `periodSeconds` 1 і `failureThreshold` 20 дають 20 с до першого рестарту, поки процес не почав слухати. Після першого успіху ця проба вимикається, і далі зависання ловить вже liveness (`periodSeconds` 10, `failureThreshold` 3 — близько 30 с). Якби той самий повільний старт прикривали лише `initialDelaySeconds` у liveness, довелося б тримати велику паузу і для мертвого процесу теж: перша перевірка зависання чекала б усю цю паузу, а не 30 с.
+
+Секрет збірки — файл `.npm_token` (у git його немає), змонтований як `RUN --mount=type=secret`. Приватного npm-реєстру немає, токен — приманка. Поріг сканера рахує `scripts/scan.sh` з звіту Trivy: `SCAN_MAX=-1` дає `gate=fail`, `SCAN_MAX=99999` дає `gate=pass`. Той самий скрипт викликає крок `.github/workflows/scan.yml` з `SCAN_MAX=99999`, бо в distroless лишаються виправні CRITICAL+HIGH, а база сканера їде щодоби. Зелений образ не обіцяємо.
+
+## Observability
+
+Один ключ — `trace_id` активного спана OpenTelemetry. `src/main.ts` імпортує ініціалізацію OTel першим рядком, до застосунку. Pino бере ключ у mixin через `trace.getActiveSpan()?.spanContext().traceId`, тож жодна функція не приймає `req`, щоб дописати корелятор. `userId`, `tenant` і `idempotencyKey` живуть окремо в `AsyncLocalStorage`. Шар записується як `logger.child({ layer })`: контролер, сервіс, репозиторій. Тіло логіну і решти auth-запитів у лог не пишеться. `redact` лишається для `req.headers.authorization`, `password` і `body.password`, якщо такий об'єкт усе ж передали.
+
+RED — лічильник `http_requests_total` і гістограма `http_request_duration_seconds` з лейблами `method`, `route`, `status`. `route` береться зі збігу Express (`req.route.path`), той самий шаблон, що зареєстрував Nest: `/orders/:id`, `/orders/:id/status`. Шлях, якого немає в роутері, сідає в один лейбл `unmatched`, а не в сирий URL. Бакети: `0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10` секунд. Найповільніший запит демо спить 200 мс на `id=slow`; верхня скінченна межа 10 с лишає запас, щоб `histogram_quantile` не впирався в край саме тоді, коли запит повільний. Запит із 5xx закриває спан статусом ERROR і пише в лог `reason` — текст винятку.
+
+Стенд — один контейнер `grafana/otel-lgtm:0.11.11` (`observability/compose.yml`). Prometheus скрейпить `/metrics` сервісу на `host.docker.internal:3000` (`observability/prometheus.yaml`, інтервал 5 с). Після двох прогонів `demo:trace` контейнер займав 723 МіБ з 7,7 ГіБ Docker. Кластер kind із ДЗ #28 на цей час не піднятий. Grafana на цьому стенді анонімна, окремого пароля немає. Ті самі три адреси перевіряє `infra/` до будь-якого виклику кластера: порожнє значення кидає ім'я змінної.
+
+| Змінна | Джерело | Навіщо |
+|---|---|---|
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | сховище | OTLP HTTP колектора, у стенді `http://127.0.0.1:22918` |
+| `PROMETHEUS_URL` | сховище | Prometheus, у стенді `http://127.0.0.1:22911` |
+| `TRACE_API_URL` | сховище | Tempo HTTP, у стенді `http://127.0.0.1:22904` |
+
+Дашборд `observability/grafana/dashboards/red.json` підхоплює `observability/grafana/dashboard-provider.yml`, датасорси провіжаться `observability/grafana/datasources.yml`. Три панелі:
+
+| Питання | PromQL |
+|---|---|
+| Скільки запитів (Rate) | `sum by (route) (rate(http_requests_total{service="marketplace"}[1m]))` |
+| Яка частка 5xx (Errors) | `sum by (route) (rate(http_requests_total{service="marketplace",status=~"5.."}[1m])) / sum by (route) (rate(http_requests_total{service="marketplace"}[1m]))` |
+| Наскільки повільно (Duration) | `histogram_quantile(0.95, sum by (le, route) (rate(http_request_duration_seconds_bucket{service="marketplace"}[1m])))` |
+
+Вікно `[1m]`, бо демо коротке: `[5m]` на хвилинному прогоні майже нічого не покаже.
+
+SLI — частка запитів `POST /orders` і `GET /orders/:id`, що завершились швидше за 500 мс і без 5xx. SLO — 99,5 % таких запитів за 30 днів. Бюджет помилок: 0,005 × 30 діб × 24 год × 60 хв = 216 хвилин на місяць.
+
+Числа прогону — у блоці `### ДЗ#29` вище.
+
+## AWS
+смуга: запасна (LocalStack)
+teardown-run: https://github.com/FedorenkoVitaliy/marketplace-api/actions/runs/44657276964
+
+pinning to a prior version will opt you out of any future updates or security patches.
+
+Програми Pulumi: `infra/base` (бюджет, мережа, роль знесення; погодинних ресурсів немає) і `infra/demo` (інстанс RDS, балансувальник, ціль; NAT лише за прапорцем). Файл, який бере B3, — `infra/base/package.json`: `git ls-files 'package.json' '*/package.json'` віддає його першим, не кореневий `package.json`. Регіон обох стеків — `eu-central-1` (`aws:region` у `infra/base/Pulumi.base.yaml` і `infra/demo/Pulumi.demo.yaml`). Образ `localstack/localstack:4.14.0`, порт `23166`. Прогін знесення — рядок `teardown-run` вище. У його логу `state-resources-left`, `tagged-resources-left`, `rds-left`, `alb-left`, `nat-left` і `eip-left` дорівнюють нулю. Регіон перевірок — `eu-central-1` і `us-east-1`.
+
+### Ставка
+
+Дата знімка в ТЗ — 24.08.2026. Курс НБУ в ТЗ — 44,7064 грн/$ на 25.08.2026. Місяць — 730 год. Рядки нижче взяті з того знімка в тексті завдання.
+
+| Рядок | Ставка | За 730 год |
+|---|---|---:|
+| ALB | $0,027/год | $19,71 |
+| RDS Multi-AZ instance | $0,037/год | $27,01 |
+| gp3 20 ГіБ | $0,274/ГіБ-міс × 20 | $5,48 |
+| Public IPv4 × 2 під балансувальником | $0,005/год × 2 | $7,30 |
+| LCU (оцінка навчального навантаження) | | $0,29 |
+| **Разом** | **$0,08191/год** | **$59,79** |
+
+$59,79 за 730 год = $0,08191/год.
+
+### Дозволи teardown
+
+Кожен рядок — один `Action` із `teardownPolicy` у `infra/base/stack.ts`. У кожному statement `Resource` — `"*"`, бо ARN ресурсів `demo` ще невідомі, коли створюється `base`. В `Action` зірочки немає.
+
+- `rds:DeleteDBInstance` — знести інстанс RDS.
+- `rds:DescribeDBInstances` — прочитати інстанс перед знесенням.
+- `rds:DeleteDBSubnetGroup` — знести групу підмереж бази.
+- `rds:DescribeDBSubnetGroups` — прочитати цю групу.
+- `rds:ListTagsForResource` — теги ресурсу RDS.
+- `elasticloadbalancing:DeleteLoadBalancer` — знести балансувальник.
+- `elasticloadbalancing:DeleteListener` — знести його слухач.
+- `elasticloadbalancing:DeleteTargetGroup` — знести target group.
+- `elasticloadbalancing:DeregisterTargets` — зняти цілі перед видаленням групи.
+- `elasticloadbalancing:DescribeLoadBalancers` — прочитати балансувальник.
+- `elasticloadbalancing:DescribeListeners` — прочитати слухачі.
+- `elasticloadbalancing:DescribeTargetGroups` — прочитати target group.
+- `elasticloadbalancing:DescribeTargetHealth` — стан цілей.
+- `elasticloadbalancing:DescribeLoadBalancerAttributes` — атрибути балансувальника.
+- `elasticloadbalancing:DescribeTargetGroupAttributes` — атрибути групи.
+- `elasticloadbalancing:DescribeTags` — теги балансувальника і групи.
+- `ec2:DeleteNatGateway` — знести NAT, якщо прапорець `hw31:withNat` його підняв.
+- `ec2:DescribeNatGateways` — прочитати NAT.
+- `ec2:ReleaseAddress` — відпустити адресу NAT.
+- `ec2:DisassociateAddress` — відвʼязати адресу перед release.
+- `ec2:DescribeAddresses` — прочитати адреси, включно з хвостом EIP.
+- `lambda:DeleteFunction` — знести функцію-ціль балансувальника.
+- `lambda:GetFunction` — прочитати функцію.
+- `lambda:RemovePermission` — зняти дозвіл виклику з балансувальника.
+- `lambda:GetPolicy` — прочитати політику функції.
+- `iam:DeleteRole` — знести роль цілі.
+- `iam:GetRole` — прочитати роль.
+- `iam:DetachRolePolicy` — відчепити керовану політику логів.
+- `iam:ListAttachedRolePolicies` — побачити причеплені політики.
+- `iam:ListRolePolicies` — побачити inline-політики.
+- `iam:DeleteRolePolicy` — знести inline-політику, якщо вона є.
+- `iam:ListInstanceProfilesForRole` — перевірити, що роль не в instance profile, інакше `DeleteRole` не проходить.
+- `tag:GetResources` — підрахунок ресурсів з тегом `Project=nodejs-pro-hw31`.
+- `sts:GetCallerIdentity` — хто викликає знесення.
+
+`sim-allowed` і `sim-denied` у `evidence/iam.txt` пише скрипт, який читає документ цієї політики. Це не вивід `aws iam simulate-principal-policy`. Позитив: у якомусь `Allow` є `rds:DeleteDBInstance`, рядок `sim-allowed=allowed`. Негатив: `s3:DeleteBucket` немає в жодному `Action` і немає `Action` `"*"`, рядок `sim-denied=implicitDeny`. Поруч скрипт ставить `sim-source=policy-document`.
+
+LocalStack цю політику не застосовує. Я не перевіряв її локально, бо перевірити локально неможливо.
+
+Транскрипт емулятора лягає в `evidence/localstack-iam.txt`. Це інший файл, ніж `evidence/iam.txt`.
+
+### RDS Multi-AZ проти стека з #15
+
+Сервіс `db` у `docker-compose.yml` — `postgres:16-alpine`, порт `5432`, `max_connections=20`. Окремої streaming-replica в compose немає. Сервіс `pgbouncer` — `edoburu/pgbouncer:v1.24.1-p1`, хост-порт `6432`, конфіг `pgbouncer/pgbouncer.ini` (`pool_mode = transaction`, `marketplace = host=db port=5432 dbname=marketplace`). Застосунок ходить у `127.0.0.1:6432` (`DB_URL` у `.env.example`). `scripts/backup.sh` знімає `pg_dump -Fc` у `backups/marketplace-YYYY-MM-DD-HHMMSS.dump`. Розклад `backup.cron` — 03:00. `scripts/restore-drill.sh` піднімає контейнер `restore` (профіль `drill`, порт `5433`) і друкує `MATCH`. Числа drill — у `RESTORE-DRILL.md`.
+
+RDS забирає фейловер інстанса і сховище standby. Лишає пул зʼєднань PgBouncer, логічний бекап `backup.sh` і перевірку `restore-drill.sh`. Репліку для читання теж лишає: standby не читається. Відповідь не «усе».
+
+### KMS
+
+KMS тут — шар під `ENCRYPTION_KEY`, не заміна сховищу #11. Секрети як і раніше їдуть через `scripts/with-secrets.sh`. Власний customer-managed key не створювали. `storageEncrypted: true` лишає ключ AWS `aws/rds`.
+
+### Бекенд стану
+
+ДЗ #28 тримає стан у `file://${ROOT}/.pulumi` через `scripts/pulumi.sh` (програма `infra/index.ts`, `infra/Pulumi.yaml`, стек `hw28`). На основній смузі так не можна: воркер GitHub не бачить ноутбук. На запасній `file://` можна, бо білити нічого. Джоба тримає свій `file://` на диску раннера (`PULUMI_BACKEND_URL` = `file://` у `runner.temp`).
+
+Якщо Free plan недоступний, бюджет і destroy — єдиний захист. На цій здачі запасна смуга, бо живими грошима не платимо і чужий SSO не чіпаємо.
+
+### Бонус
+
+Два NAT, по одному на зону, в орієнтирі ТЗ дають $142,72 на місяць. З них NAT разом зі своїми Public IPv4 — близько 58% (у ТЗ 58,3%, $82). На схемі цього рядка немає. У нашому `demo` NAT лише за прапорцем і в ставку $59,79 не входить.
+
+`eu-north-1` проти `eu-central-1` за тим самим орієнтиром ТЗ: Стокгольм дешевший на 9,8%, нерівномірно. NAT −11,5%, ALB −11,3%, RDS −11%, Public IPv4 і егрес однакові. Різниця в погодинних ставках NAT, балансувальника і бази. Плоский відсоток на наш стек без NAT не переноситься. Регіон здачі — `eu-central-1`.
+
+S3 gateway endpoint не бере погодинну плату і не бере плату за обробку даних. Він замінює NAT, коли з приватної підмережі потрібен лише трафік S3. Решту інтернету він не виводить: образи, API і будь-який не-S3 трафік як і раніше йдуть через NAT. У цьому стеку в приватній підмережі лише база, їй інтернет не потрібен. Обіцянка #26 (приватний бакет) закривається випадком «лише S3».
+
+Бюджет — лист, не гальмо. Дані оновлюються з лагом 8–12 год. За 12 год стек намотує $0,08191 × 12 = $0,98. BudgetAction спіймала б поріг із тим самим лагом і могла б зупинити інстанс RDS. Ресурс BudgetAction не створювали. Зупиняють тип акаунта і destroy.
+
+Емулятор кроку 7.4 ДЗ #26 — nginx: бреше в бік дозволу, як LocalStack. Прибрати `stale-while-revalidate` з `Cache-Control` недостатньо: `STALE` дає `proxy_cache_use_stale`.
 

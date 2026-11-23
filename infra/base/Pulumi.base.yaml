@@ -1,0 +1,23 @@
+config:
+  aws:region: eu-central-1
+  aws:defaultTags:
+    tags:
+      Project: nodejs-pro-hw31
+      Stack: base
+      ManagedBy: pulumi
+  aws:accessKey: test
+  aws:secretKey: test
+  aws:skipCredentialsValidation: "true"
+  aws:skipMetadataApiCheck: "true"
+  aws:skipRequestingAccountId: "true"
+  aws:endpoints:
+    - budgets: http://127.0.0.1:23166
+      ec2: http://127.0.0.1:23166
+      iam: http://127.0.0.1:23166
+      sts: http://127.0.0.1:23166
+  hw31:azs:
+    - eu-central-1a
+    - eu-central-1b
+  hw31:budgetEmail: budget-alert@example.com
+  hw31:githubRepo: FedorenkoVitaliy/marketplace-api
+encryptionsalt: v1:Epr6Bj+FRkk=:v1:apdTRLnZT0aR/b3R:YNj1T2n+xviHF+Jk/UUtRCPoyxrvjg==

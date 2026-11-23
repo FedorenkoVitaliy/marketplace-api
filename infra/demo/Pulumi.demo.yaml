@@ -1,0 +1,28 @@
+config:
+  aws:region: eu-central-1
+  aws:defaultTags:
+    tags:
+      Project: nodejs-pro-hw31
+      Stack: demo
+      ManagedBy: pulumi
+  aws:accessKey: test
+  aws:secretKey: test
+  aws:skipCredentialsValidation: "true"
+  aws:skipMetadataApiCheck: "true"
+  aws:skipRequestingAccountId: "true"
+  aws:s3UsePathStyle: "true"
+  aws:endpoints:
+    - ec2: http://127.0.0.1:23166
+      elasticloadbalancing: http://127.0.0.1:23166
+      elasticloadbalancingv2: http://127.0.0.1:23166
+      elb: http://127.0.0.1:23166
+      elbv2: http://127.0.0.1:23166
+      iam: http://127.0.0.1:23166
+      kms: http://127.0.0.1:23166
+      lambda: http://127.0.0.1:23166
+      rds: http://127.0.0.1:23166
+      s3: http://127.0.0.1:23166
+      sts: http://127.0.0.1:23166
+  # file:// бекенд: organization / name з infra/base/Pulumi.yaml / стек base
+  hw31:baseStackRef: organization/hw31-base/base
+  hw31:withNat: "false"

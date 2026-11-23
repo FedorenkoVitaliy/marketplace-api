@@ -1,0 +1,14 @@
+name: hw31
+services:
+  localstack:
+    image: localstack/localstack:4.14.0
+    container_name: hw31-localstack
+    ports:
+      - "127.0.0.1:23166:4566"
+    environment:
+      ENFORCE_IAM: "${ENFORCE_IAM:-0}"
+      IAM_SOFT_MODE: "0"
+      AWS_DEFAULT_REGION: eu-central-1
+    volumes:
+      - ./data:/var/lib/localstack
+    mem_limit: 1g

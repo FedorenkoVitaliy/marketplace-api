@@ -1,0 +1,85 @@
+Previewing update (demo):
+
+ +  pulumi:pulumi:Stack hw31-demo-demo create 
+ +  pulumi:pulumi:Stack hw31-demo-demo create read pulumi:pulumi:StackReference organization/hw31-base/base
+ +  pulumi:pulumi:Stack hw31-demo-demo create read pulumi:pulumi:StackReference organization/hw31-base/base
+@ previewing update....
+ +  aws:iam:Role hw31-target-role create 
+ +  aws:lb:TargetGroup hw31-tg create 
+ +  aws:lb:LoadBalancer hw31-alb create 
+ +  aws:rds:SubnetGroup hw31-db-subnets create 
+ +  aws:iam:RolePolicyAttachment hw31-target-logs create 
+ +  aws:lambda:Function hw31-target create 
+ +  aws:rds:Instance hw31-db create 
+ +  aws:lb:Listener hw31-http create 
+ +  aws:lambda:Permission hw31-alb-invoke create 
+ +  pulumi:pulumi:Stack hw31-demo-demo create warning: Undefined value (natGatewayId) will not show as a stack output.
+ +  aws:lb:TargetGroupAttachment hw31-tg-fn create 
+ +  pulumi:pulumi:Stack hw31-demo-demo create 1 warning
+Diagnostics:
+  pulumi:pulumi:Stack (hw31-demo-demo):
+    warning: Undefined value (natGatewayId) will not show as a stack output.
+
+Outputs:
+    albDns        : [unknown]
+    dbAz          : [unknown]
+    dbIdentifier  : "hw31-db2a0969a"
+    targetGroupArn: [unknown]
+    vpcId         : [unknown]
+
+Resources:
+    + 11 to create
+
+Updating (demo):
+
+ +  pulumi:pulumi:Stack hw31-demo-demo creating (0s) 
+ +  pulumi:pulumi:Stack hw31-demo-demo creating (0s) read pulumi:pulumi:StackReference organization/hw31-base/base
+ +  pulumi:pulumi:Stack hw31-demo-demo creating (0s) read pulumi:pulumi:StackReference organization/hw31-base/base
+@ updating....
+ +  aws:iam:Role hw31-target-role creating (0s) 
+ +  aws:lb:TargetGroup hw31-tg creating (0s) 
+ +  aws:lb:LoadBalancer hw31-alb creating (0s) 
+ +  aws:rds:SubnetGroup hw31-db-subnets creating (0s) 
+ +  aws:lb:LoadBalancer hw31-alb creating (0s) error:   sdk-v2/provider2.go:572: sdk.helper_schema: Null value found in list: Null values are not allowed for this attribute value.: provider=aws@6.83.4
+    aws:rds:SubnetGroup hw31-db-subnets\n  error:   sdk-v2/provider2.go:572: sdk.helper_schema: Null value found in list: Null values are not allowed for this attribute value.: provider=aws@6.83.4
+ +  aws:lb:LoadBalancer hw31-alb creating (0s) error:   sdk-v2/provider2.go:572: sdk.helper_schema: Null value found in list: Null values are not allowed for this attribute value.: provider=aws@6.83.4
+ +  aws:lb:LoadBalancer hw31-alb creating (0s) error: diffing urn:pulumi:demo::hw31-demo::aws:lb/loadBalancer:LoadBalancer::hw31-alb: 2 errors occurred:
+ +  aws:rds:SubnetGroup hw31-db-subnets creating (0s) error: diffing urn:pulumi:demo::hw31-demo::aws:rds/subnetGroup:SubnetGroup::hw31-db-subnets: 1 error occurred:
+ +  aws:lb:LoadBalancer hw31-alb **creating failed** error: diffing urn:pulumi:demo::hw31-demo::aws:lb/loadBalancer:LoadBalancer::hw31-alb: 2 errors occurred:
+ +  aws:rds:SubnetGroup hw31-db-subnets **creating failed** error: diffing urn:pulumi:demo::hw31-demo::aws:rds/subnetGroup:SubnetGroup::hw31-db-subnets: 1 error occurred:
+ +  aws:iam:Role hw31-target-role created (0.05s) 
+ +  aws:lb:TargetGroup hw31-tg creating (0s) error:   sdk-v2/provider2.go:572: sdk.helper_schema: reading ELBv2 Target Group (hw31-tg-d922dc7): operation error Elastic Load Balancing v2: DescribeTargetGroups, https response error StatusCode: 501, RequestID: e3d12d3a-e534-49ae-8f20-e8da6e8a43f3, api error InternalFailure: Sorry, the elbv2 service is not included within your LocalStack license, but is available in an upgraded license. Please refer to https://docs.localstack.cloud/references/coverage for more details.: provider=aws@6.83.4
+ +  aws:lb:TargetGroup hw31-tg creating (0s) error: 1 error occurred:
+ +  aws:lb:TargetGroup hw31-tg **creating failed** error: 1 error occurred:
+ +  pulumi:pulumi:Stack hw31-demo-demo creating (1s) error: update failed
+ +  pulumi:pulumi:Stack hw31-demo-demo **creating failed** 1 error
+    aws:rds:SubnetGroup hw31-db-subnets\n **failed** 1 error
+Diagnostics:
+  aws:lb:TargetGroup (hw31-tg):
+    error:   sdk-v2/provider2.go:572: sdk.helper_schema: reading ELBv2 Target Group (hw31-tg-d922dc7): operation error Elastic Load Balancing v2: DescribeTargetGroups, https response error StatusCode: 501, RequestID: e3d12d3a-e534-49ae-8f20-e8da6e8a43f3, api error InternalFailure: Sorry, the elbv2 service is not included within your LocalStack license, but is available in an upgraded license. Please refer to https://docs.localstack.cloud/references/coverage for more details.: provider=aws@6.83.4
+    error: 1 error occurred:
+    	* reading ELBv2 Target Group (hw31-tg-d922dc7): operation error Elastic Load Balancing v2: DescribeTargetGroups, https response error StatusCode: 501, RequestID: e3d12d3a-e534-49ae-8f20-e8da6e8a43f3, api error InternalFailure: Sorry, the elbv2 service is not included within your LocalStack license, but is available in an upgraded license. Please refer to https://docs.localstack.cloud/references/coverage for more details.
+
+  aws:lb:LoadBalancer (hw31-alb):
+    error:   sdk-v2/provider2.go:572: sdk.helper_schema: Null value found in list: Null values are not allowed for this attribute value.: provider=aws@6.83.4
+    error:   sdk-v2/provider2.go:572: sdk.helper_schema: Null value found in list: Null values are not allowed for this attribute value.: provider=aws@6.83.4
+    error: diffing urn:pulumi:demo::hw31-demo::aws:lb/loadBalancer:LoadBalancer::hw31-alb: 2 errors occurred:
+    	* [security_groups] Null value found in list: Null values are not allowed for this attribute value.
+    	* [subnets] Null value found in list: Null values are not allowed for this attribute value.
+
+  aws:rds:SubnetGroup (hw31-db-subnets):
+    error: diffing urn:pulumi:demo::hw31-demo::aws:rds/subnetGroup:SubnetGroup::hw31-db-subnets: 1 error occurred:
+    	* [subnet_ids] Null value found in list: Null values are not allowed for this attribute value.
+
+  aws:rds:SubnetGroup (hw31-db-subnets\n):
+    error:   sdk-v2/provider2.go:572: sdk.helper_schema: Null value found in list: Null values are not allowed for this attribute value.: provider=aws@6.83.4
+
+  pulumi:pulumi:Stack (hw31-demo-demo):
+    error: update failed
+
+Resources:
+    + 2 created
+    5 errored
+
+Duration: 2s
+
