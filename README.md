@@ -26,7 +26,7 @@ grep -in "джерело\|OWASP" README.md
 
 Той самий процес на `GET /orders/:id` пише pino-рядок із `layer=orders.controller` і `trace_id`. Окремо корелятор без решти стека показує `npm run demo:logs`. Бізнес-крок прогону: `bash scripts/with-secrets.sh dev npm run demo:auth` сідає покупця `buyer@shop.test` і друкує `with-token=200` та `no-token=401`.
 
-Образ у kind лишається probe-сервером з ДЗ#28: у поді немає Postgres, Redis і Rabbit, а вимір дивиться на викочування без жодної невдалої відповіді. Бізнес-контур рев'юер проходить локально, командами вище. Зелений деплой конвеєра і teardown із шістьма нулями — докази блока розгортання, не заміна цього прогону.
+Образ у kind лишається probe-сервером з ДЗ#28: у поді немає Postgres, Redis і Rabbit, а вимір дивиться на викочування без жодної невдалої відповіді. Бізнес-контур рев'юер проходить локально, командами вище. Зелений деплой конвеєра і teardown із порожніми ключами знесення — докази блока розгортання, не заміна цього прогону.
 
 | Блок | Шлях | Чим закрито |
 |---|---|---|
@@ -35,7 +35,7 @@ grep -in "джерело\|OWASP" README.md
 | Дані | курсу | Postgres, міграції TypeORM, PgBouncer, `scripts/restore-drill.sh` |
 | Безпека | курсу | JWT ES256, refresh-сім'я, RBAC, Zod на старті. Пароль БД — файл `secrets/db_password`, решта секретів — сховище через `scripts/with-secrets.sh` |
 | Фон | курсу | outbox у тій самій транзакції, що й замовлення, далі RabbitMQ |
-| Docker і деплой | курсу | `docker compose up -d --wait`; kind + Pulumi; прогін деплою в Actions; teardown із шістьма нулями |
+| Docker і деплой | курсу | `docker compose up -d --wait`; kind + Pulumi; прогін деплою в Actions; teardown із порожніми ключами знесення |
 | Спостережуваність, тести, pipeline | курсу | pino, Prometheus, OpenTelemetry, `/healthz` і `/readyz`, Jest (e2e, integration, Pact), GitHub Actions |
 
 Журнал нижче лишається хронологією ДЗ. Ранні абзаци («JWT пізніше», «хмар ще немає») перекриті цією таблицею.
@@ -305,7 +305,7 @@ SKIP LOCKED 322 мс · w1=3 w2=3 w3=3 w4=3 · оброблено двічі: 0
 
 ### ДЗ#31
 
-Смуга запасна. D2, D3 і D4 на цій смузі не оцінюються. Ключів живого виміру в `evidence/demos.txt` немає навмисно: немає `az-before`, `az-after`, `failover-seconds`, `event`, `alb-dns`, `http-code`, `target-state`, `nat-minutes`, `nat-billed-hours`. Доказ знесення — прогін teardown у GitHub Actions, у логу якого шість ключів дорівнюють нулю. Локальний рядок `state-resources-left=0` лишається поруч.
+Смуга запасна. D2, D3 і D4 на цій смузі не оцінюються. Ключів живого виміру в `evidence/demos.txt` немає навмисно: немає `az-before`, `az-after`, `failover-seconds`, `event`, `alb-dns`, `http-code`, `target-state`, `nat-minutes`, `nat-billed-hours`. Доказ знесення — прогін teardown у GitHub Actions: `state-resources-left`, `tagged-resources-left`, `nat-left` і `eip-left` дорівнюють нулю; `rds-left` і `alb-left` на community LocalStack можуть бути `unavailable (501)`. Локальний рядок `state-resources-left=0` лишається поруч.
 
 ```bash
 REPO=FedorenkoVitaliy/marketplace-api
@@ -1041,11 +1041,11 @@ SLI — частка запитів `POST /orders` і `GET /orders/:id`, що з
 
 ## AWS
 смуга: запасна (LocalStack)
-teardown-run: https://github.com/FedorenkoVitaliy/marketplace-api/actions/runs/44657276964
+teardown-run: https://github.com/FedorenkoVitaliy/marketplace-api/actions/runs/45702729178
 
 pinning to a prior version will opt you out of any future updates or security patches.
 
-Програми Pulumi: `infra/base` (бюджет, мережа, роль знесення; погодинних ресурсів немає) і `infra/demo` (інстанс RDS, балансувальник, ціль; NAT лише за прапорцем). Файл, який бере B3, — `infra/base/package.json`: `git ls-files 'package.json' '*/package.json'` віддає його першим, не кореневий `package.json`. Регіон обох стеків — `eu-central-1` (`aws:region` у `infra/base/Pulumi.base.yaml` і `infra/demo/Pulumi.demo.yaml`). Образ `localstack/localstack:4.14.0`, порт `23166`. Прогін знесення — рядок `teardown-run` вище. У його логу `state-resources-left`, `tagged-resources-left`, `rds-left`, `alb-left`, `nat-left` і `eip-left` дорівнюють нулю. Регіон перевірок — `eu-central-1` і `us-east-1`.
+Програми Pulumi: `infra/base` (бюджет, мережа, роль знесення; погодинних ресурсів немає) і `infra/demo` (інстанс RDS, балансувальник, ціль; NAT лише за прапорцем). Файл, який бере B3, — `infra/base/package.json`: `git ls-files 'package.json' '*/package.json'` віддає його першим, не кореневий `package.json`. Регіон обох стеків — `eu-central-1` (`aws:region` у `infra/base/Pulumi.base.yaml` і `infra/demo/Pulumi.demo.yaml`). Образ `localstack/localstack:4.14.0`, порт `23166`. Прогін знесення — рядок `teardown-run` вище. У його логу `state-resources-left=0`, `tagged-resources-left=0`, `nat-left=0`, `eip-left=0`; `rds-left` і `alb-left` на community LocalStack — `unavailable (501)`. Регіон перевірок — `eu-central-1` і `us-east-1`.
 
 ### Ставка
 
