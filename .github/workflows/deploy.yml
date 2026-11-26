@@ -60,7 +60,11 @@ jobs:
           password: ${{ github.token }}
       - name: promote dispatch
         if: github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: bash scripts/ci-promote.sh "${{ inputs.digest }}"
       - name: promote push
         if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: bash scripts/ci-promote.sh
