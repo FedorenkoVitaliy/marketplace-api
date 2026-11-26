@@ -105,27 +105,78 @@ jobs:
             fi
             printf '%s' "$value"
           }
+          # RDS/ELBv2 на community LocalStack відповідають 501. Це не «нуль ресурсів».
+          count_aws() {
+            local name="$1" soft501="$2"
+            shift 2
+            local raw trimmed
+            set +e
+            raw="$(aws "$@" --output text 2>&1)"
+            set -e
+            trimmed="${raw//[[:space:]]/}"
+            if [[ "$trimmed" =~ ^[0-9]+$ ]]; then
+              printf '%s' "$trimmed"
+              return 0
+            fi
+            if [ "$soft501" = "501" ] && echo "$raw" | grep -qiE '501|NotImplemented|not implemented|license'; then
+              printf '%s' "unavailable"
+              return 0
+            fi
+            echo "${name} не число: ${raw:-порожньо}" >&2
+            exit 1
+          }
           tagged_region() {
             aws resourcegroupstaggingapi get-resources --endpoint-url "$EP" --region "$1" \
               --tag-filters Key=Project,Values=nodejs-pro-hw31 Key=Stack,Values=demo \
               --query "length(ResourceTagMappingList[?!contains(ResourceARN, ':natgateway/')])" --output text
           }
+          require_zero() {
+            local name="$1" value="$2"
+            if [ "$value" != "0" ]; then
+              echo "${name} має бути 0: ${value}" >&2
+              exit 1
+            fi
+          }
+          require_zero_or_unavailable() {
+            local name="$1" value="$2"
+            if [ "$value" != "0" ] && [ "$value" != "unavailable" ]; then
+              echo "${name} має бути 0 або unavailable: ${value}" >&2
+              exit 1
+            fi
+          }
 
           R="$AWS_REGION"
           state="$(num state-resources-left "$state")"
+          echo "state-resources-left=$state"
+
           tagged_here="$(tagged_region "$R")"
           tagged_east="$(tagged_region us-east-1)"
           tagged="$(( $(num tagged-here "$tagged_here") + $(num tagged-east "$tagged_east") ))"
-          rds="$(num rds-left "$(aws rds describe-db-instances --endpoint-url "$EP" --region "$R" --query 'length(DBInstances)' --output text)")"
-          alb="$(num alb-left "$(aws elbv2 describe-load-balancers --endpoint-url "$EP" --region "$R" --query 'length(LoadBalancers)' --output text)")"
-          nat="$(num nat-left "$(aws ec2 describe-nat-gateways --endpoint-url "$EP" --region "$R" --filter Name=state,Values=available,pending --query 'length(NatGateways)' --output text)")"
-          eip="$(num eip-left "$(aws ec2 describe-addresses --endpoint-url "$EP" --region "$R" --query 'length(Addresses)' --output text)")"
-
-          echo "state-resources-left=$state"
           echo "tagged-resources-left=$tagged"
-          echo "rds-left=$rds"
-          echo "alb-left=$alb"
+
+          rds="$(count_aws rds-left 501 rds describe-db-instances --endpoint-url "$EP" --region "$R" --query 'length(DBInstances)')"
+          if [ "$rds" = "unavailable" ]; then
+            echo "rds-left=unavailable (501)"
+          else
+            echo "rds-left=$rds"
+          fi
+
+          alb="$(count_aws alb-left 501 elbv2 describe-load-balancers --endpoint-url "$EP" --region "$R" --query 'length(LoadBalancers)')"
+          if [ "$alb" = "unavailable" ]; then
+            echo "alb-left=unavailable (501)"
+          else
+            echo "alb-left=$alb"
+          fi
+
+          nat="$(count_aws nat-left no ec2 describe-nat-gateways --endpoint-url "$EP" --region "$R" --filter Name=state,Values=available,pending --query 'length(NatGateways)')"
           echo "nat-left=$nat"
+
+          eip="$(count_aws eip-left no ec2 describe-addresses --endpoint-url "$EP" --region "$R" --query 'length(Addresses)')"
           echo "eip-left=$eip"
 
-          [ "$state" = 0 ] && [ "$tagged" = 0 ] && [ "$rds" = 0 ] && [ "$alb" = 0 ] && [ "$nat" = 0 ] && [ "$eip" = 0 ]
+          require_zero state-resources-left "$state"
+          require_zero tagged-resources-left "$tagged"
+          require_zero_or_unavailable rds-left "$rds"
+          require_zero_or_unavailable alb-left "$alb"
+          require_zero nat-left "$nat"
+          require_zero eip-left "$eip"

@@ -1,6 +1,57 @@
 # Marketplace API
 
-Курсовий сервіс Node.js PRO (дефолтний домен лекцій: товари + замовлення + пізніше платежі й сповіщення). Для покупця — зібрати кошик і оформити замовлення без подвійного списання. Для продавця — каталог і залишок, за який конкурують покупці.
+Курсовий сервіс Node.js PRO (дефолтний домен лекцій: товари + замовлення + платежі й сповіщення). Для покупця — зібрати кошик і оформити замовлення без подвійного списання. Для продавця — каталог і залишок, за який конкурують покупці.
+
+## Приймальний прогін
+
+Команди в тому порядку, в якому їх знімають до захисту. Compose піднімає Postgres, Rabbit, Redis і MinIO. Процес API лишається на хості: секрети приходять зі сховища через `scripts/with-secrets.sh`, а не з файлу в git.
+
+```bash
+npm ci
+npm run build
+docker compose up -d --wait
+bash scripts/with-secrets.sh dev npm run migrate
+bash scripts/with-secrets.sh dev npm start
+```
+
+`npm start` слухає `3000`. У другому терміналі:
+
+```bash
+curl -fsS http://127.0.0.1:3000/health
+git log --all -- .env
+grep -in "джерело\|OWASP" README.md
+```
+
+`/health` віддає `uptime` і базу не чіпає. `/healthz` — liveness, теж без бази. `/readyz` робить `SELECT 1` і без з'єднання відповідає 503. Порожній `git log -- .env` і таблиці нижче (колонка «Джерело», OWASP Top 10:2025) — частина цього ж прогону.
+
+Той самий процес на `GET /orders/:id` пише pino-рядок із `layer=orders.controller` і `trace_id`. Окремо корелятор без решти стека показує `npm run demo:logs`. Бізнес-крок прогону: `bash scripts/with-secrets.sh dev npm run demo:auth` сідає покупця `buyer@shop.test` і друкує `with-token=200` та `no-token=401`.
+
+Образ у kind лишається probe-сервером з ДЗ#28: у поді немає Postgres, Redis і Rabbit, а вимір дивиться на викочування без жодної невдалої відповіді. Бізнес-контур рев'юер проходить локально, командами вище. Зелений деплой конвеєра і teardown із порожніми ключами знесення — докази блока розгортання, не заміна цього прогону.
+
+| Блок | Шлях | Чим закрито |
+|---|---|---|
+| Архітектура | курсу | цей README: домен, компроміси, журнал рішень |
+| Контур і API | курсу | `openapi/openapi.yaml`, `express-openapi-validator`, checkout |
+| Дані | курсу | Postgres, міграції TypeORM, PgBouncer, `scripts/restore-drill.sh` |
+| Безпека | курсу | JWT ES256, refresh-сім'я, RBAC, Zod на старті. Пароль БД — файл `secrets/db_password`, решта секретів — сховище через `scripts/with-secrets.sh` |
+| Фон | курсу | outbox у тій самій транзакції, що й замовлення, далі RabbitMQ |
+| Docker і деплой | курсу | `docker compose up -d --wait`; kind + Pulumi; прогін деплою в Actions; teardown із порожніми ключами знесення |
+| Спостережуваність, тести, pipeline | курсу | pino, Prometheus, OpenTelemetry, `/healthz` і `/readyz`, Jest (e2e, integration, Pact), GitHub Actions |
+
+Журнал нижче лишається хронологією ДЗ. Ранні абзаци («JWT пізніше», «хмар ще немає») перекриті цією таблицею.
+
+| OWASP Top 10:2025 | Застосовна | Що зроблено |
+|---|---|---|
+| A01 Broken Access Control | так | `GET /orders/:id` без токена — 401; чуже замовлення — 403; роль читається з БД, не з claim |
+| A02 Security Misconfiguration | так | зламаний env зупиняє процес і називає змінну; образ у kind без shell і не від root |
+| A03 Software Supply Chain Failures | так | один digest на збірку і деплой, Trivy у конвеєрі, залежності з lockfile |
+| A04 Cryptographic Failures | так | access — ES256; пароль — scrypt; refresh у БД лише як HMAC |
+| A05 Injection | так | SQL лише з параметрами `$1` |
+| A06 Insecure Design | так | checkout однією транзакцією; повтор `Idempotency-Key` не створює друге замовлення |
+| A07 Authentication Failures | так | logout гасить access і всю refresh-сім'ю; повтор використаного refresh теж гасить сім'ю |
+| A08 Software or Data Integrity Failures | так | вебхук перевіряє HMAC над сирим тілом і суму проти замороженої |
+| A09 Security Logging & Alerting Failures | так | один `trace_id` на запит; токен і пароль у лог не пишуться |
+| A10 Mishandling of Exceptional Conditions | так | `40001` / `40P01` повторюють усю транзакцію; решта помилок checkout не повторюється і не лишає замовлення-сироту |
 
 ## 1. Що це за сервіс
 
@@ -12,13 +63,13 @@ User stories:
 - Як покупець, я бачу картку товару за id; якщо його немає — `404` у `application/problem+json`.
 - Як покупець, я створюю замовлення з `Idempotency-Key`: повтор того самого ключа й тіла не створює друге списання.
 - Як продавець, я тримаю обмежений залишок; два одночасні checkout не повинні продати більше, ніж є (ДЗ#14).
-- Як покупець, я очікую подію «замовлення прийнято / оплачено» — пізніше realtime і черга (ДЗ#18–19).
+- Як покупець, я бачу зміну статусу свого замовлення: подія пишеться в outbox тією самою транзакцією, relay віддає її в RabbitMQ, потік власника — `GET /orders/:id/events`.
 
 ## 2. Домен
 
 Звʼязки: **User** (покупець / продавець) розміщує **Product** з **Stock**; покупець створює **Order** з позиціями товарів; **Payment** фіксує незворотну оплату; **Notification** — подія для клієнта. Фото товару — вкладення до Product (S3 на ДЗ#26). Каталог читають часто, змінюють рідко (кеш на ДЗ#23).
 
-Зараз у OpenAPI живі ресурси **Product** і **Order**. User, Stock, Payment, Notification — іменовані тут, у спеку зайдуть наступними ДЗ, не вигаданими пізніше.
+У OpenAPI живі каталог, замовлення, оплата, вебхук і auth. Завантаження файлів свідомо поза спекою (`ignorePaths` на `/uploads`): контракт там — presigned URL, не JSON-схема.
 
 | Вимога | Як закрито | Де в курсі |
 |---|---|---|
@@ -38,9 +89,9 @@ User stories:
 
 **Асинхронність.** Transactional outbox (`outbox` + relay `SKIP LOCKED`) → RabbitMQ; споживач — `claimAndApply` (позначка + ефект в одному COMMIT). Платіж — порт `PaymentProvider` (зараз `StubProvider`), вебхук HMAC, леджер append-only. HTTP-ідемпотентність create/pay — таблиця `api_requests`.
 
-**Auth.** У спеці `security: []`. Ролі закладені в домені; JWT/RBAC — ДЗ#24, не зараз.
+**Auth.** Access — JWT ES256, refresh — окрема сім'я в Postgres. `GET /orders/:id` без Bearer дає 401, чуже замовлення — 403. Роль для рішення читається з `users.role`, не з claim.
 
-**Deploy.** Локально: Compose для Postgres, `npm start` = `tsc && node dist/src/main.js`. Образ збирається Dockerfile без `.env` і `secrets/` (див. `.dockerignore`). Хмара / K8s — пізніші лекції.
+**Deploy.** Локально контур — Compose і `npm start`. Образ `marketplace-api:hw28` — distroless, без shell, uid 65532; у kind він відповідає на `/healthz` і `/readyz` під викочуванням. Повний Nest у цей под не покладений: виміру деплою потрібен живий сокет, а не Postgres у кластері.
 
 ## 4. Архітектурні компроміси
 
@@ -62,7 +113,7 @@ Zod-схема `src/config/env.schema.ts` — єдине місце, яке чи
 
 | Змінна / секрет | Джерело | На старті / на зʼєднання |
 |---|---|---|
-| `PORT` | `.env` (приклад у `.env.example`) | старт, Zod coerce number 1024–65535 |
+| `PORT` | `.env` або сховище; якщо змінної немає — `3000` | старт, Zod coerce number 1024–65535 |
 | `DB_URL` | `.env` | старт, host/user/db з URL; пароль з URL **не** йде в `pg.Pool` (інакше затре функцію з файла) |
 | `LOG_LEVEL` | `.env`, дефолт `info` | старт |
 | пароль `app_user` | файл `secrets/db_password` (gitignored) | кожне **нове** зʼєднання пулу |
@@ -254,7 +305,7 @@ SKIP LOCKED 322 мс · w1=3 w2=3 w3=3 w4=3 · оброблено двічі: 0
 
 ### ДЗ#31
 
-Смуга запасна. D2, D3 і D4 на цій смузі не оцінюються. Ключів живого виміру в `evidence/demos.txt` немає навмисно: немає `az-before`, `az-after`, `failover-seconds`, `event`, `alb-dns`, `http-code`, `target-state`, `nat-minutes`, `nat-billed-hours`. Доказ знесення — прогін teardown у GitHub Actions, у логу якого шість ключів дорівнюють нулю. Локальний рядок `state-resources-left=0` лишається поруч.
+Смуга запасна. D2, D3 і D4 на цій смузі не оцінюються. Ключів живого виміру в `evidence/demos.txt` немає навмисно: немає `az-before`, `az-after`, `failover-seconds`, `event`, `alb-dns`, `http-code`, `target-state`, `nat-minutes`, `nat-billed-hours`. Доказ знесення — прогін teardown у GitHub Actions: `state-resources-left`, `tagged-resources-left`, `nat-left` і `eip-left` дорівнюють нулю; `rds-left` і `alb-left` на community LocalStack можуть бути `unavailable (501)`. Локальний рядок `state-resources-left=0` лишається поруч.
 
 ```bash
 REPO=FedorenkoVitaliy/marketplace-api
@@ -990,11 +1041,11 @@ SLI — частка запитів `POST /orders` і `GET /orders/:id`, що з
 
 ## AWS
 смуга: запасна (LocalStack)
-teardown-run: https://github.com/FedorenkoVitaliy/marketplace-api/actions/runs/44657276964
+teardown-run: https://github.com/FedorenkoVitaliy/marketplace-api/actions/runs/45702729178
 
 pinning to a prior version will opt you out of any future updates or security patches.
 
-Програми Pulumi: `infra/base` (бюджет, мережа, роль знесення; погодинних ресурсів немає) і `infra/demo` (інстанс RDS, балансувальник, ціль; NAT лише за прапорцем). Файл, який бере B3, — `infra/base/package.json`: `git ls-files 'package.json' '*/package.json'` віддає його першим, не кореневий `package.json`. Регіон обох стеків — `eu-central-1` (`aws:region` у `infra/base/Pulumi.base.yaml` і `infra/demo/Pulumi.demo.yaml`). Образ `localstack/localstack:4.14.0`, порт `23166`. Прогін знесення — рядок `teardown-run` вище. У його логу `state-resources-left`, `tagged-resources-left`, `rds-left`, `alb-left`, `nat-left` і `eip-left` дорівнюють нулю. Регіон перевірок — `eu-central-1` і `us-east-1`.
+Програми Pulumi: `infra/base` (бюджет, мережа, роль знесення; погодинних ресурсів немає) і `infra/demo` (інстанс RDS, балансувальник, ціль; NAT лише за прапорцем). Файл, який бере B3, — `infra/base/package.json`: `git ls-files 'package.json' '*/package.json'` віддає його першим, не кореневий `package.json`. Регіон обох стеків — `eu-central-1` (`aws:region` у `infra/base/Pulumi.base.yaml` і `infra/demo/Pulumi.demo.yaml`). Образ `localstack/localstack:4.14.0`, порт `23166`. Прогін знесення — рядок `teardown-run` вище. У його логу `state-resources-left=0`, `tagged-resources-left=0`, `nat-left=0`, `eip-left=0`; `rds-left` і `alb-left` на community LocalStack — `unavailable (501)`. Регіон перевірок — `eu-central-1` і `us-east-1`.
 
 ### Ставка
 

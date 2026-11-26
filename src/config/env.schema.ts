@@ -5,7 +5,7 @@ import z from 'zod';
  * AppModule, тобто до першого зʼєднання з БД.
  */
 export const envSchema = z.object({
-  PORT: z.coerce.number().int().min(1024).max(65535),
+  PORT: z.coerce.number().int().min(1024).max(65535).default(3000),
   DB_URL: z.url({
     protocol: /^postgres$/,
   }),
